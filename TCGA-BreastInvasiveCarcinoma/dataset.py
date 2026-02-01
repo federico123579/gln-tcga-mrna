@@ -84,16 +84,21 @@ class Dataset:
 
 @memory.cache
 def _download_tcga_brca_study() -> Path:
-    """Download TCGA BRCA study from cBioPortal DataHub via Git LFS.
+    """Download TCGA BRCA study files directly via HTTP.
 
-    Uses sparse checkout to only download the needed study directory.
+    Downloads only the required mRNA expression files (~150MB total) directly
+    from GitHub's raw file URLs. This bypasses Git entirely, avoiding the
+    overhead of cloning the massive cBioPortal DataHub repository structure.
+
+    GitHub automatically redirects LFS file URLs to their storage location,
+    making this approach as fast as your internet connection allows.
+
     Results are cached using joblib.Memory.
 
     Returns:
         Path to the extracted data directory.
     """
-    import shutil
-    import subprocess
+    import requests
 
     data_dir = CACHE_DIR / STUDY_NAME
 
@@ -101,97 +106,56 @@ def _download_tcga_brca_study() -> Path:
         return data_dir
 
     print("Downloading TCGA BRCA data from cBioPortal DataHub...")
-    print("  Using Git LFS sparse checkout (only downloading required files)")
+    print("  Using direct HTTP download (bypassing Git for speed)")
 
-    # Create a temporary directory for the sparse checkout
-    repo_dir = CACHE_DIR / "datahub_sparse"
+    # Base URL for raw files from GitHub (LFS files are auto-redirected)
+    base_url = "https://github.com/cBioPortal/datahub/raw/master"
 
-    try:
-        # Clean up any previous failed attempt
-        if repo_dir.exists():
-            shutil.rmtree(repo_dir)
+    # Files to download (relative paths within the repo)
+    files_to_download = [
+        f"public/{STUDY_NAME}/data_mrna_seq_v2_rsem.txt",
+        f"public/{STUDY_NAME}/normals/data_mrna_seq_v2_rsem_normal_samples.txt",
+    ]
 
-        # Initialize sparse checkout
-        subprocess.run(
-            [
-                "git",
-                "clone",
-                "--filter=blob:none",
-                "--no-checkout",
-                "--depth=1",
-                DATAHUB_REPO,
-                str(repo_dir),
-            ],
-            check=True,
-            capture_output=True,
-        )
+    # Create target directory structure
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "normals").mkdir(exist_ok=True)
 
-        # Configure sparse checkout for just the study we need
-        subprocess.run(
-            ["git", "-C", str(repo_dir), "sparse-checkout", "init", "--cone"],
-            check=True,
-            capture_output=True,
-        )
+    for file_path in files_to_download:
+        url = f"{base_url}/{file_path}"
 
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(repo_dir),
-                "sparse-checkout",
-                "set",
-                f"public/{STUDY_NAME}",
-            ],
-            check=True,
-            capture_output=True,
-        )
+        # Map repo path to local path (strip public/STUDY_NAME prefix)
+        relative_path = file_path.replace(f"public/{STUDY_NAME}/", "")
+        local_path = data_dir / relative_path
 
-        print("  Checking out files (this may take a few minutes for LFS files)...")
+        print(f"  Fetching: {relative_path}")
 
-        # Install LFS hooks in the repo before checkout
-        subprocess.run(
-            ["git", "-C", str(repo_dir), "lfs", "install", "--local"],
-            check=True,
-            capture_output=True,
-        )
+        try:
+            # Stream download for large LFS files
+            with requests.get(url, stream=True, timeout=300) as r:
+                r.raise_for_status()
 
-        # Checkout the files (this triggers LFS download)
-        subprocess.run(
-            ["git", "-C", str(repo_dir), "checkout"],
-            check=True,
-            capture_output=True,
-        )
+                # Get file size for progress info
+                total_size = int(r.headers.get("content-length", 0))
+                if total_size > 0:
+                    print(f"    Size: {total_size / 1024 / 1024:.1f} MB")
 
-        # Pull LFS files explicitly
-        subprocess.run(
-            ["git", "-C", str(repo_dir), "lfs", "pull"],
-            check=True,
-            capture_output=True,
-        )
+                # Write to disk in chunks
+                with open(local_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
 
-        # Move the study directory to the cache
-        study_path = repo_dir / "public" / STUDY_NAME
-        if study_path.exists():
-            # Verify that key data files are not LFS pointers
-            mrna_file = study_path / "data_mrna_seq_v2_rsem.txt"
-            if mrna_file.exists():
-                with open(mrna_file) as f:
-                    first_line = f.readline()
-                if first_line.startswith("version https://git-lfs"):
-                    raise RuntimeError(
-                        "LFS files were not properly downloaded. "
-                        "Please ensure Git LFS is installed: brew install git-lfs"
-                    )
-            shutil.move(str(study_path), str(data_dir))
-            print(f"  Downloaded to: {data_dir}")
-        else:
-            raise FileNotFoundError(f"Study not found at {study_path}")
+            print("    ✓ Success")
 
-    finally:
-        # Clean up the sparse checkout repo
-        if repo_dir.exists():
-            shutil.rmtree(repo_dir)
+        except requests.exceptions.RequestException as e:
+            # Clean up partial download
+            if data_dir.exists():
+                import shutil
 
+                shutil.rmtree(data_dir)
+            raise RuntimeError(f"Failed to download {file_path}: {e}") from e
+
+    print(f"  Downloaded to: {data_dir}")
     return data_dir
 
 

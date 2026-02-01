@@ -10,6 +10,7 @@ import torch
 from torch.optim import Adam
 from torch.optim.lr_scheduler import LinearLR
 from torch.utils.data import DataLoader, TensorDataset
+from tqdm import tqdm
 
 # Add project root to path for gln imports
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -190,7 +191,11 @@ def train_gln(
 
     # Training loop
     model.train()
-    for epoch in range(config["num_epochs"]):
+    epoch_iter = range(config["num_epochs"])
+    if verbose:
+        epoch_iter = tqdm(epoch_iter, desc="Training", unit="epoch")
+
+    for epoch in epoch_iter:
         epoch_loss = 0.0
         n_batches = 0
 
@@ -215,7 +220,7 @@ def train_gln(
 
         if verbose:
             avg_loss = epoch_loss / n_batches
-            print(f"  Epoch {epoch + 1}/{config['num_epochs']}: loss = {avg_loss:.4f}")
+            epoch_iter.set_postfix(loss=f"{avg_loss:.4f}")
 
     # Evaluate accuracy
     accuracy = binary_accuracy(model, transf, test_dl, device=device)

@@ -1,0 +1,30 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Fromatter and linter caches
+.ruff_cache/
+
+# Virtual environments
+.venv
+
+# Cache for downloaded data
+.cache/
+
+# Database files
+*.db
+
+# Os files
+.DS_Store
+
+
+# Saved models
+models/
+
+# Generated results (plots, CSVs)
+results/
+experiments/

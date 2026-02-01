@@ -163,6 +163,27 @@ def get_summary_stats(db_path: str | Path) -> dict[str, Any]:
     }
 
 
+def get_results_df(conn: sqlite3.Connection) -> pl.DataFrame:
+    """Get all results from database as a Polars DataFrame.
+
+    Args:
+        conn: Database connection.
+
+    Returns:
+        Polars DataFrame with all results.
+    """
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM results")
+    columns = [description[0] for description in cursor.description]
+    rows = cursor.fetchall()
+
+    if not rows:
+        return pl.DataFrame(schema={col: pl.Utf8 for col in columns})
+
+    df = pl.DataFrame(rows, schema=columns, orient="row")
+    return df
+
+
 if __name__ == "__main__":
     # Quick test
     import tempfile

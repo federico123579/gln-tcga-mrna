@@ -2,6 +2,10 @@
 
 Classifies Tumor vs Normal tissue using mRNA expression profiles from TCGA Breast Invasive Carcinoma data.
 
+## Data Source
+
+Data is automatically downloaded from [cBioPortal DataHub](https://github.com/cBioPortal/datahub) - specifically the [Breast Invasive Carcinoma (TCGA, PanCancer Atlas)](https://www.cbioportal.org/study/summary?id=brca_tcga_pan_can_atlas_2018) study.
+
 ## Requirements
 
 - Python 3.11+
@@ -20,14 +24,42 @@ sudo apt install git-lfs
 git lfs install
 ```
 
-## Run Experiment
+## Usage
+
+### Option 1: Full Pipeline
 
 ```bash
-cd TCGA-BreastInvasiveCarcinoma
+# Run training + analysis in one command
 uv run python run_experiment.py
 ```
 
-On first run, the data will be automatically downloaded from cBioPortal DataHub (~150MB).
+### Option 2: Separate Steps (recommended)
+
+```bash
+# Step 1: Train models with different seeds
+uv run python train_models.py
+
+# Step 2: Run biomarker analysis on best model
+uv run python run_analysis.py
+```
+
+### Command Line Options
+
+```bash
+# Train with custom parameters
+uv run python train_models.py --seeds 42 43 --epochs 20 --lr 0.005
+
+# List available trained models
+uv run python run_analysis.py --list
+
+# Analyze specific model
+uv run python run_analysis.py --seed 42
+
+# Analyze all models
+uv run python run_analysis.py --all
+```
+
+On first run, the data will be automatically downloaded from cBioPortal DataHub (~150MB for required files).
 
 ## Output
 
@@ -40,15 +72,13 @@ After running, you'll find:
 ## Query Results
 
 ```python
-from results import query_results, get_summary_stats
+from results import get_results_df, init_database
 
 # Load all results as DataFrame
-df = query_results("results.db")
+conn = init_database("results.db")
+df = get_results_df(conn)
 print(df)
-
-# Get summary statistics
-stats = get_summary_stats("results.db")
-print(f"Mean accuracy: {stats['mean_accuracy']:.2%}")
+conn.close()
 ```
 
 ## Load Saved Model
@@ -58,3 +88,7 @@ from train import load_model
 
 model, transformer, config = load_model("models/gln_seed42.pt")
 ```
+
+## Biomarker Analysis
+
+The analysis uses **Integrated Gradients** to compute gene importance - measuring how much each gene contributes to the model's tumor vs normal predictions. This is more meaningful than extracting weights, as it captures the actual learned decision-making process.
