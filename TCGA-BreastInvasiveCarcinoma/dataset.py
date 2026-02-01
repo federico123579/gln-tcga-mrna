@@ -2,6 +2,7 @@
 TCGA Breast Invasive Carcinoma dataset loading.
 
 Loads mRNA expression data for Tumor vs Normal classification.
+Downloads data from cBioPortal DataHub with caching.
 """
 
 from dataclasses import dataclass
@@ -10,7 +11,17 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
+from joblib import Memory
 from torch.utils.data import TensorDataset
+
+# Cache directory for downloaded data
+CACHE_DIR = Path(__file__).parent / ".cache"
+CACHE_DIR.mkdir(exist_ok=True)
+memory = Memory(CACHE_DIR, verbose=0)
+
+# cBioPortal DataHub GitHub repository (uses Git LFS for large files)
+DATAHUB_REPO = "https://github.com/cBioPortal/datahub.git"
+STUDY_NAME = "brca_tcga_pan_can_atlas_2018"
 
 
 @dataclass
@@ -31,6 +42,10 @@ class Dataset:
     @property
     def input_size(self) -> int:
         return self.X.shape[1]
+
+    @property
+    def n_samples(self) -> int:
+        return self.X.shape[0]
 
     def train_test_split(
         self,
@@ -67,29 +82,175 @@ class Dataset:
         return train_ds, test_ds
 
 
+@memory.cache
+def _download_tcga_brca_study() -> Path:
+    """Download TCGA BRCA study from cBioPortal DataHub via Git LFS.
+
+    Uses sparse checkout to only download the needed study directory.
+    Results are cached using joblib.Memory.
+
+    Returns:
+        Path to the extracted data directory.
+    """
+    import shutil
+    import subprocess
+
+    data_dir = CACHE_DIR / STUDY_NAME
+
+    if data_dir.exists():
+        return data_dir
+
+    print("Downloading TCGA BRCA data from cBioPortal DataHub...")
+    print("  Using Git LFS sparse checkout (only downloading required files)")
+
+    # Create a temporary directory for the sparse checkout
+    repo_dir = CACHE_DIR / "datahub_sparse"
+
+    try:
+        # Clean up any previous failed attempt
+        if repo_dir.exists():
+            shutil.rmtree(repo_dir)
+
+        # Initialize sparse checkout
+        subprocess.run(
+            [
+                "git",
+                "clone",
+                "--filter=blob:none",
+                "--no-checkout",
+                "--depth=1",
+                DATAHUB_REPO,
+                str(repo_dir),
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+        # Configure sparse checkout for just the study we need
+        subprocess.run(
+            ["git", "-C", str(repo_dir), "sparse-checkout", "init", "--cone"],
+            check=True,
+            capture_output=True,
+        )
+
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_dir),
+                "sparse-checkout",
+                "set",
+                f"public/{STUDY_NAME}",
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+        print("  Checking out files (this may take a few minutes for LFS files)...")
+
+        # Install LFS hooks in the repo before checkout
+        subprocess.run(
+            ["git", "-C", str(repo_dir), "lfs", "install", "--local"],
+            check=True,
+            capture_output=True,
+        )
+
+        # Checkout the files (this triggers LFS download)
+        subprocess.run(
+            ["git", "-C", str(repo_dir), "checkout"],
+            check=True,
+            capture_output=True,
+        )
+
+        # Pull LFS files explicitly
+        subprocess.run(
+            ["git", "-C", str(repo_dir), "lfs", "pull"],
+            check=True,
+            capture_output=True,
+        )
+
+        # Move the study directory to the cache
+        study_path = repo_dir / "public" / STUDY_NAME
+        if study_path.exists():
+            # Verify that key data files are not LFS pointers
+            mrna_file = study_path / "data_mrna_seq_v2_rsem.txt"
+            if mrna_file.exists():
+                with open(mrna_file) as f:
+                    first_line = f.readline()
+                if first_line.startswith("version https://git-lfs"):
+                    raise RuntimeError(
+                        "LFS files were not properly downloaded. "
+                        "Please ensure Git LFS is installed: brew install git-lfs"
+                    )
+            shutil.move(str(study_path), str(data_dir))
+            print(f"  Downloaded to: {data_dir}")
+        else:
+            raise FileNotFoundError(f"Study not found at {study_path}")
+
+    finally:
+        # Clean up the sparse checkout repo
+        if repo_dir.exists():
+            shutil.rmtree(repo_dir)
+
+    return data_dir
+
+
+def download_tcga_brca_study() -> Path:
+    """Public wrapper for downloading TCGA BRCA study.
+
+    Returns:
+        Path to the extracted data directory.
+    """
+    return _download_tcga_brca_study()
+
+
 def load_tcga_tumor_vs_normal(
     data_dir: str | Path | None = None,
+    auto_download: bool = True,
 ) -> Dataset:
     """Load TCGA Breast Cancer data for Tumor vs Normal classification.
 
     Args:
         data_dir: Path to the brca_tcga_pan_can_atlas_2018 directory.
-                  Defaults to the directory relative to this script.
+                  If None and auto_download=True, downloads from cBioPortal.
+                  If None and auto_download=False, uses local directory.
+        auto_download: Whether to automatically download data if not found.
 
     Returns:
         Dataset with mRNA expression features and binary labels.
     """
     if data_dir is None:
-        data_dir = Path(__file__).parent / "brca_tcga_pan_can_atlas_2018"
+        # Check for local directory first
+        local_dir = Path(__file__).parent / "brca_tcga_pan_can_atlas_2018"
+        if local_dir.exists():
+            data_dir = local_dir
+        elif auto_download:
+            data_dir = download_tcga_brca_study()
+        else:
+            data_dir = local_dir  # Will fail with helpful error
     else:
         data_dir = Path(data_dir)
 
     # --- Load tumor samples ---
     tumor_file = data_dir / "data_mrna_seq_v2_rsem.txt"
+
+    # Check if file is an LFS pointer (corrupted download)
+    with open(tumor_file) as f:
+        first_line = f.readline()
+    if first_line.startswith("version https://git-lfs"):
+        raise RuntimeError(
+            f"Data file {tumor_file} is a Git LFS pointer, not actual data.\n"
+            "The LFS files were not properly downloaded. Please:\n"
+            "  1. Delete the cache directory: rm -rf TCGA-BreastInvasiveCarcinoma/.cache\n"
+            "  2. Ensure Git LFS is installed: brew install git-lfs && git lfs install\n"
+            "  3. Re-run the experiment"
+        )
+
     tumor_df = pd.read_csv(tumor_file, sep="\t", index_col=0)
 
-    # Drop Entrez_Gene_Id column
-    tumor_df = tumor_df.drop("Entrez_Gene_Id", axis=1)
+    # Drop Entrez_Gene_Id column if present
+    if "Entrez_Gene_Id" in tumor_df.columns:
+        tumor_df = tumor_df.drop("Entrez_Gene_Id", axis=1)
 
     # Store gene names before transposing
     gene_names = tumor_df.index.tolist()
@@ -101,8 +262,9 @@ def load_tcga_tumor_vs_normal(
     normal_file = data_dir / "normals" / "data_mrna_seq_v2_rsem_normal_samples.txt"
     normal_df = pd.read_csv(normal_file, sep="\t", index_col=0)
 
-    # Drop Entrez_Gene_Id column
-    normal_df = normal_df.drop("Entrez_Gene_Id", axis=1)
+    # Drop Entrez_Gene_Id column if present
+    if "Entrez_Gene_Id" in normal_df.columns:
+        normal_df = normal_df.drop("Entrez_Gene_Id", axis=1)
 
     # Transpose: samples as rows, genes as columns
     normal_df = normal_df.T
@@ -130,10 +292,12 @@ def load_tcga_tumor_vs_normal(
     X_normal = normal_df.values.astype(np.float64)
 
     X = np.vstack([X_normal, X_tumor])
-    y = np.concatenate([
-        np.zeros(len(X_normal)),  # Normal = 0
-        np.ones(len(X_tumor)),    # Tumor = 1
-    ])
+    y = np.concatenate(
+        [
+            np.zeros(len(X_normal)),  # Normal = 0
+            np.ones(len(X_tumor)),  # Tumor = 1
+        ]
+    )
 
     # --- Preprocessing: log2(x + 1) transform ---
     # Stabilizes variance for RSEM values
@@ -155,4 +319,6 @@ if __name__ == "__main__":
     print(dataset)
     print(f"X shape: {dataset.X.shape}")
     print(f"y shape: {dataset.y.shape}")
-    print(f"Class distribution: Normal={int((dataset.y == 0).sum())}, Tumor={int((dataset.y == 1).sum())}")
+    print(
+        f"Class distribution: Normal={int((dataset.y == 0).sum())}, Tumor={int((dataset.y == 1).sum())}"
+    )

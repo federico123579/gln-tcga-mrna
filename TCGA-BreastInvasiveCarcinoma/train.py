@@ -4,6 +4,7 @@ Training utilities for GLN on TCGA data.
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import torch
 from torch.optim import Adam
@@ -15,6 +16,73 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 import gln
+
+
+def save_model(
+    model: gln.GLN,
+    transf: gln.InputTransformer,
+    config: dict[str, Any],
+    path: str | Path,
+) -> None:
+    """Save trained model, transformer, and config to a checkpoint file.
+
+    Args:
+        model: Trained GLN model.
+        transf: Input transformer fitted on training data.
+        config: Training configuration dict.
+        path: Path to save the checkpoint.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    checkpoint = {
+        "model_state_dict": model.state_dict(),
+        "transformer_state": {
+            "means": transf.means,
+            "stds": transf.stds,
+            "eps": transf.eps,
+        },
+        "config": config,
+        "input_size": model.input_size,
+        "layer_sizes": model.layer_sizes,
+        "context_dimension": model.context_dimension,
+    }
+    torch.save(checkpoint, path)
+
+
+def load_model(
+    path: str | Path,
+    device: torch.device | str = "cpu",
+) -> tuple[gln.GLN, gln.InputTransformer, dict[str, Any]]:
+    """Load trained model and transformer from a checkpoint file.
+
+    Args:
+        path: Path to the checkpoint file.
+        device: Device to load the model onto.
+
+    Returns:
+        Tuple of (model, transformer, config).
+    """
+    checkpoint = torch.load(path, map_location=device, weights_only=False)
+
+    # Reconstruct model
+    model = gln.GLN(
+        input_size=checkpoint["input_size"],
+        layer_sizes=checkpoint["layer_sizes"],
+        context_dimension=checkpoint["context_dimension"],
+        bias=checkpoint["config"].get("bias", True),
+        eps=checkpoint["config"].get("eps", 1e-6),
+    )
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model.to(device)
+    model.eval()
+
+    # Reconstruct transformer
+    transf = gln.InputTransformer(eps=checkpoint["transformer_state"]["eps"])
+    transf.means = checkpoint["transformer_state"]["means"]
+    transf.stds = checkpoint["transformer_state"]["stds"]
+
+    return model, transf, checkpoint["config"]
 
 
 def binary_accuracy(

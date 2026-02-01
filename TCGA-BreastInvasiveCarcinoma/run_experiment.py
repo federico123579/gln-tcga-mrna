@@ -6,14 +6,34 @@ Classifies Tumor vs Normal tissue using mRNA expression profiles.
 All 20,472 genes are used as features - the GLN's gating mechanism
 handles feature selection internally.
 
+Features:
+    - Automated data download from cBioPortal with caching
+    - Results stored in SQLite database
+    - Model checkpoints saved for reproducibility
+    - Biomarker analysis report with gene importance rankings
+
 Usage:
     python run_experiment.py
 """
 
+import time
+from pathlib import Path
+
 import torch
 
+from analyze import generate_report
 from dataset import load_tcga_tumor_vs_normal
-from train import train_gln
+from results import init_database, save_result, get_summary_stats
+from train import save_model, train_gln
+
+# =============================================================================
+# Paths
+# =============================================================================
+
+EXPERIMENT_DIR = Path(__file__).parent
+RESULTS_DB = EXPERIMENT_DIR / "results.db"
+MODELS_DIR = EXPERIMENT_DIR / "models"
+RESULTS_DIR = EXPERIMENT_DIR / "results"
 
 # =============================================================================
 # Experiment Configuration
@@ -30,6 +50,8 @@ CONFIG = {
     "batch_size": 32,
 
     # Regularization
+    "bias": True,
+    "eps": 1e-6,
     "weight_clamp_min": -10.0,
     "weight_clamp_max": 10.0,
 
@@ -47,7 +69,16 @@ def main():
     print("=" * 60)
     print()
 
-    # Load dataset
+    # Initialize output directories
+    MODELS_DIR.mkdir(exist_ok=True)
+    RESULTS_DIR.mkdir(exist_ok=True)
+
+    # Initialize database
+    conn = init_database(RESULTS_DB)
+    print(f"Results database: {RESULTS_DB}")
+    print()
+
+    # Load dataset (auto-downloads if needed)
     print("Loading TCGA mRNA expression data...")
     dataset = load_tcga_tumor_vs_normal()
     print(f"  {dataset}")
@@ -64,6 +95,10 @@ def main():
     print()
 
     accuracies = []
+    best_model = None
+    best_transf = None
+    best_accuracy = 0.0
+
     for seed in CONFIG["seeds"]:
         # Split data with this seed
         train_ds, test_ds = dataset.train_test_split(
@@ -74,7 +109,8 @@ def main():
         # Create config for this run
         run_config = {**CONFIG, "seed": seed}
 
-        # Train model
+        # Train model with timing
+        start_time = time.time()
         model, transf, accuracy = train_gln(
             train_ds,
             test_ds,
@@ -82,9 +118,38 @@ def main():
             device=DEVICE,
             verbose=False,
         )
+        training_time = time.time() - start_time
 
         accuracies.append(accuracy)
-        print(f"  Seed {seed}: Accuracy = {accuracy:.2%}")
+        print(f"  Seed {seed}: Accuracy = {accuracy:.2%} ({training_time:.1f}s)")
+
+        # Save model checkpoint
+        model_path = MODELS_DIR / f"gln_seed{seed}.pt"
+        save_model(model, transf, run_config, model_path)
+
+        # Save result to database
+        save_result(conn, {
+            "seed": seed,
+            "accuracy": accuracy,
+            "training_time": training_time,
+            "layer_sizes": run_config["layer_sizes"],
+            "context_dimension": run_config["context_dimension"],
+            "learning_rate": run_config["learning_rate"],
+            "num_epochs": run_config["num_epochs"],
+            "batch_size": run_config["batch_size"],
+            "n_train_samples": len(train_ds),
+            "n_test_samples": len(test_ds),
+            "n_genes": dataset.input_size,
+            "model_path": str(model_path),
+        })
+
+        # Track best model
+        if accuracy > best_accuracy:
+            best_accuracy = accuracy
+            best_model = model
+            best_transf = transf
+
+    conn.close()
 
     # Summary statistics
     print()
@@ -97,6 +162,23 @@ def main():
     print(f"  Min accuracy:     {min_acc:.2%}")
     print(f"  Max accuracy:     {max_acc:.2%}")
     print()
+
+    # Generate biomarker analysis using best model
+    print("Generating biomarker analysis report...")
+    generate_report(
+        best_model,
+        dataset.gene_names,
+        RESULTS_DIR,
+        CONFIG,
+    )
+
+    print()
+    print("=" * 60)
+    print("Experiment complete!")
+    print(f"  Models saved to:  {MODELS_DIR}")
+    print(f"  Results saved to: {RESULTS_DIR}")
+    print(f"  Database:         {RESULTS_DB}")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
