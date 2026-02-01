@@ -1,0 +1,192 @@
+# Bibliography for GLN-TCGA Report
+# Format: Hayagriva (Typst's native bibliography format)
+
+gln:
+  type: article
+  title: "Gated Linear Networks"
+  author:
+    - Veness, Joel
+    - Lattimore, Tor
+    - Budden, David
+    - Bhoopchand, Avishkar
+    - Matber, Christopher
+    - Grabska-Barwinska, Agnieszka
+    - Sezener, Eren
+    - Wang, Jianan
+    - Toth, Peter
+    - Schmitt, Simon
+    - Hutter, Marcus
+  date: 2021
+  parent:
+    type: proceedings
+    title: "Proceedings of the AAAI Conference on Artificial Intelligence"
+    volume: 35
+    issue: 11
+
+integrated-gradients:
+  type: article
+  title: "Axiomatic Attribution for Deep Networks"
+  author:
+    - Sundararajan, Mukund
+    - Taly, Ankur
+    - Yan, Qiqi
+  date: 2017
+  parent:
+    type: proceedings
+    title: "International Conference on Machine Learning (ICML)"
+    pages: "3319-3328"
+
+tcga-brca:
+  type: article
+  title: "Comprehensive molecular portraits of human breast tumours"
+  author:
+    - name: "The Cancer Genome Atlas Network"
+  date: 2012
+  parent:
+    type: periodical
+    title: "Nature"
+    volume: 490
+    issue: 7418
+    pages: "61-70"
+  doi: "10.1038/nature11412"
+
+cbioportal:
+  type: article
+  title: "The cBio Cancer Genomics Portal: An Open Platform for Exploring Multidimensional Cancer Genomics Data"
+  author:
+    - Cerami, Ethan
+    - Gao, Jianjiong
+    - Dogrusoz, Ugur
+    - Gross, Benjamin E.
+    - Sumer, Selcuk Onur
+    - Aksoy, Bulent Arman
+    - Jacobsen, Anders
+    - Byrne, Caitlin J.
+    - Heuer, Michael L.
+    - Larsson, Erik
+    - Antipin, Yevgeniy
+    - Reva, Boris
+    - Goldberg, Arthur P.
+    - Sander, Chris
+    - Schultz, Nikolaus
+  date: 2012
+  parent:
+    type: periodical
+    title: "Cancer Discovery"
+    volume: 2
+    issue: 5
+    pages: "401-404"
+  doi: "10.1158/2159-8290.CD-12-0095"
+
+breast-cancer-subtypes:
+  type: article
+  title: "Molecular portraits of human breast tumours"
+  author:
+    - Perou, Charles M.
+    - Sorlie, Therese
+    - Eisen, Michael B.
+    - van de Rijn, Matt
+    - Jeffrey, Stefanie S.
+    - Rees, Christian A.
+    - Pollack, Jonathan R.
+    - Ross, Douglas T.
+    - Johnsen, Hilde
+    - Akslen, Lars A.
+    - Fluge, Oystein
+    - Pergamenschikov, Alexander
+    - Williams, Cheryl
+    - Zhu, Shirley X.
+    - Lonning, Per E.
+    - Borresen-Dale, Anne-Lise
+    - Brown, Patrick O.
+    - Botstein, David
+  date: 2000
+  parent:
+    type: periodical
+    title: "Nature"
+    volume: 406
+    issue: 6797
+    pages: "747-752"
+  doi: "10.1038/35021093"
+
+interpretable-ml:
+  type: book
+  title: "Interpretable Machine Learning: A Guide for Making Black Box Models Explainable"
+  author:
+    - Molnar, Christoph
+  date: 2020
+  edition: 2
+  url: "https://christophm.github.io/interpretable-ml-book/"
+
+lime:
+  type: article
+  title: "Why Should I Trust You?: Explaining the Predictions of Any Classifier"
+  author:
+    - Ribeiro, Marco Tulio
+    - Singh, Sameer
+    - Guestrin, Carlos
+  date: 2016
+  parent:
+    type: proceedings
+    title: "Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining"
+    pages: "1135-1144"
+  doi: "10.1145/2939672.2939778"
+
+deeplift:
+  type: article
+  title: "Learning Important Features Through Propagating Activation Differences"
+  author:
+    - Shrikumar, Avanti
+    - Greenside, Peyton
+    - Kundaje, Anshul
+  date: 2017
+  parent:
+    type: proceedings
+    title: "International Conference on Machine Learning (ICML)"
+    pages: "3145-3153"
+
+pytorch:
+  type: article
+  title: "PyTorch: An Imperative Style, High-Performance Deep Learning Library"
+  author:
+    - Paszke, Adam
+    - Gross, Sam
+    - Massa, Francisco
+    - Lerer, Adam
+    - Bradbury, James
+    - Chanan, Gregory
+    - Killeen, Trevor
+    - Lin, Zeming
+    - Gimelshein, Natalia
+    - Antiga, Luca
+    - Desmaison, Alban
+    - Kopf, Andreas
+    - Yang, Edward
+    - DeVito, Zachary
+    - Raison, Martin
+    - Tejani, Alykhan
+    - Chilamkurthy, Sasank
+    - Steiner, Benoit
+    - Fang, Lu
+    - Bai, Junjie
+    - Chintala, Soumith
+  date: 2019
+  parent:
+    type: proceedings
+    title: "Advances in Neural Information Processing Systems"
+    volume: 32
+
+rsem:
+  type: article
+  title: "RSEM: accurate transcript quantification from RNA-Seq data with or without a reference genome"
+  author:
+    - Li, Bo
+    - Dewey, Colin N.
+  date: 2011
+  parent:
+    type: periodical
+    title: "BMC Bioinformatics"
+    volume: 12
+    issue: 1
+    pages: "323"
+  doi: "10.1186/1471-2105-12-323"
