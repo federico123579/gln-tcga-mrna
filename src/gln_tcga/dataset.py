@@ -14,8 +14,10 @@ import torch
 from joblib import Memory
 from torch.utils.data import TensorDataset
 
+ROOT_DIR = Path(__file__).resolve().parents[2]
+
 # Cache directory for downloaded data
-CACHE_DIR = Path(__file__).parent / ".cache"
+CACHE_DIR = ROOT_DIR / ".cache"
 CACHE_DIR.mkdir(exist_ok=True)
 memory = Memory(CACHE_DIR, verbose=0)
 
@@ -185,7 +187,7 @@ def load_tcga_tumor_vs_normal(
     """
     if data_dir is None:
         # Check for local directory first
-        local_dir = Path(__file__).parent / "brca_tcga_pan_can_atlas_2018"
+        local_dir = ROOT_DIR / "brca_tcga_pan_can_atlas_2018"
         if local_dir.exists():
             data_dir = local_dir
         elif auto_download:
@@ -205,7 +207,7 @@ def load_tcga_tumor_vs_normal(
         raise RuntimeError(
             f"Data file {tumor_file} is a Git LFS pointer, not actual data.\n"
             "The LFS files were not properly downloaded. Please:\n"
-            "  1. Delete the cache directory: rm -rf TCGA-BreastInvasiveCarcinoma/.cache\n"
+            "  1. Delete the cache directory: rm -rf .cache\n"
             "  2. Ensure Git LFS is installed: brew install git-lfs && git lfs install\n"
             "  3. Re-run the experiment"
         )
@@ -258,31 +260,13 @@ def load_tcga_tumor_vs_normal(
     X = np.vstack([X_normal, X_tumor])
     y = np.concatenate(
         [
-            np.zeros(len(X_normal)),  # Normal = 0
-            np.ones(len(X_tumor)),  # Tumor = 1
+            np.zeros(len(X_normal), dtype=np.int64),
+            np.ones(len(X_tumor), dtype=np.int64),
         ]
     )
 
-    # --- Preprocessing: log2(x + 1) transform ---
-    # Stabilizes variance for RSEM values
-    X = np.log2(X + 1)
+    # Convert to torch tensors
+    X = torch.tensor(X, dtype=torch.float32)
+    y = torch.tensor(y, dtype=torch.int64)
 
-    # Handle any NaN/Inf values
-    X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
-
-    # --- Convert to tensors ---
-    X_tensor = torch.tensor(X, dtype=torch.float32)
-    y_tensor = torch.tensor(y, dtype=torch.float32)
-
-    return Dataset(X=X_tensor, y=y_tensor, gene_names=gene_names)
-
-
-if __name__ == "__main__":
-    # Quick test
-    dataset = load_tcga_tumor_vs_normal()
-    print(dataset)
-    print(f"X shape: {dataset.X.shape}")
-    print(f"y shape: {dataset.y.shape}")
-    print(
-        f"Class distribution: Normal={int((dataset.y == 0).sum())}, Tumor={int((dataset.y == 1).sum())}"
-    )
+    return Dataset(X=X, y=y, gene_names=gene_names)

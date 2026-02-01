@@ -1,0 +1,38 @@
+[project]
+name = "gln-tcga-bic-mrna"
+version = "0.1.0"
+description = "GLN experiments for TCGA Breast Invasive Carcinoma"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "gln",
+    "joblib>=1.3",
+    "matplotlib>=3.8",
+    "numpy>=2.0",
+    "pandas>=2.2",
+    "polars>=0.20",
+    "requests>=2.31",
+    "torch>=2.2",
+    "tqdm>=4.66",
+]
+
+[project.scripts]
+gln-train = "gln_tcga.cli.train_models:main"
+gln-analyze = "gln_tcga.cli.run_analysis:main"
+gln-experiment = "gln_tcga.cli.run_experiment:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv.workspace]
+members = ["gated-linear-networks"]
+
+[tool.uv.sources]
+gln = { workspace = true }

@@ -4,30 +4,23 @@ Train GLN models on TCGA Breast Invasive Carcinoma data.
 
 Trains multiple models with different seeds, saves checkpoints,
 and stores metrics in the SQLite database.
-
-Usage:
-    python train_models.py
-    python train_models.py --seeds 42 43 44
-    python train_models.py --epochs 20 --lr 0.005
 """
 
+from __future__ import annotations
+
 import argparse
+import json
+import shutil
 import time
 from pathlib import Path
 
 import torch
-from dataset import load_tcga_tumor_vs_normal
-from results import init_database, save_result
 from tqdm import tqdm
-from train import save_model, train_gln
 
-# =============================================================================
-# Paths
-# =============================================================================
-
-EXPERIMENT_DIR = Path(__file__).parent
-RESULTS_DB = EXPERIMENT_DIR / "results.db"
-MODELS_DIR = EXPERIMENT_DIR / "models"
+from gln_tcga.dataset import load_tcga_tumor_vs_normal
+from gln_tcga.experiments import resolve_experiment, snapshot_latest, write_metadata
+from gln_tcga.results import init_database, save_result
+from gln_tcga.train import save_model, train_gln
 
 # =============================================================================
 # Default Configuration
@@ -51,15 +44,21 @@ DEFAULT_CONFIG = {
 }
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Train GLN models on TCGA BRCA data")
+    parser.add_argument(
+        "--experiment",
+        type=str,
+        default="default",
+        help="Experiment name (default: default)",
+    )
     parser.add_argument(
         "--seeds",
         type=int,
         nargs="+",
         default=DEFAULT_CONFIG["seeds"],
-        help="Random seeds for training (default: 42 43 44 45 46)",
+        help="Random seeds for training (default: 42 43 44)",
     )
     parser.add_argument(
         "--epochs",
@@ -71,20 +70,20 @@ def parse_args() -> argparse.Namespace:
         "--lr",
         type=float,
         default=DEFAULT_CONFIG["learning_rate"],
-        help="Learning rate (default: 0.01)",
+        help="Learning rate (default: 0.001)",
     )
     parser.add_argument(
         "--batch-size",
         type=int,
         default=DEFAULT_CONFIG["batch_size"],
-        help="Batch size (default: 32)",
+        help="Batch size (default: 16)",
     )
     parser.add_argument(
         "--layers",
         type=int,
         nargs="+",
         default=DEFAULT_CONFIG["layer_sizes"],
-        help="Hidden layer sizes (default: 50 25)",
+        help="Hidden layer sizes (default: 10)",
     )
     parser.add_argument(
         "--context-dim",
@@ -98,7 +97,17 @@ def parse_args() -> argparse.Namespace:
         default="auto",
         help="Device: 'cpu', 'cuda', 'mps', or 'auto' (default: auto)",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--no-snapshot",
+        action="store_true",
+        help="Disable snapshotting the latest run into a timestamped folder",
+    )
+    parser.add_argument(
+        "--no-overwrite-latest",
+        action="store_true",
+        help="Do not clear the latest directory before training",
+    )
+    return parser.parse_args(argv)
 
 
 def get_device(device_arg: str) -> str:
@@ -106,15 +115,20 @@ def get_device(device_arg: str) -> str:
     if device_arg == "auto":
         if torch.cuda.is_available():
             return "cuda"
-        elif torch.backends.mps.is_available():
+        if torch.backends.mps.is_available():
             return "mps"
-        else:
-            return "cpu"
+        return "cpu"
     return device_arg
 
 
-def main():
-    args = parse_args()
+def run_training(args: argparse.Namespace) -> None:
+    paths = resolve_experiment(args.experiment, create=True)
+
+    if not args.no_overwrite_latest and paths.latest_dir.exists():
+        shutil.rmtree(paths.latest_dir)
+        paths.latest_dir.mkdir(parents=True, exist_ok=True)
+        paths.models_dir.mkdir(parents=True, exist_ok=True)
+        paths.results_dir.mkdir(parents=True, exist_ok=True)
 
     # Build config from arguments
     config = {
@@ -135,14 +149,12 @@ def main():
     print("=" * 60)
     print("TCGA Breast Cancer: Model Training")
     print("=" * 60)
+    print(f"Experiment: {paths.name}")
     print()
 
-    # Initialize output directories
-    MODELS_DIR.mkdir(exist_ok=True)
-
     # Initialize database
-    conn = init_database(RESULTS_DB)
-    print(f"Results database: {RESULTS_DB}")
+    conn = init_database(paths.db_path)
+    print(f"Results database: {paths.db_path}")
     print()
 
     # Load dataset (auto-downloads if needed)
@@ -162,7 +174,8 @@ def main():
     print(f"  Learning rate: {config['learning_rate']}")
     print()
 
-    accuracies = []
+    accuracies: list[float] = []
+    per_seed: list[dict[str, float]] = []
 
     for seed in tqdm(config["seeds"], desc="Training models", unit="seed"):
         # Split data with this seed
@@ -186,11 +199,13 @@ def main():
         training_time = time.time() - start_time
 
         accuracies.append(accuracy)
+        per_seed.append({"seed": seed, "accuracy": accuracy})
         tqdm.write(f"  Seed {seed}: Accuracy = {accuracy:.2%} ({training_time:.1f}s)")
 
         # Save model checkpoint
-        model_path = MODELS_DIR / f"gln_seed{seed}.pt"
+        model_path = paths.models_dir / f"gln_seed{seed}.pt"
         save_model(model, transf, run_config, model_path)
+        model_path_rel = str(model_path.relative_to(paths.latest_dir))
 
         # Save result to database
         save_result(
@@ -207,7 +222,7 @@ def main():
                 "n_train_samples": len(train_ds),
                 "n_test_samples": len(test_ds),
                 "n_genes": dataset.input_size,
-                "model_path": str(model_path),
+                "model_path": model_path_rel,
             },
         )
 
@@ -225,13 +240,31 @@ def main():
     print(f"  Max accuracy:     {max_acc:.2%}")
     print()
 
+    (paths.latest_dir / "train_model_config.json").write_text(
+        json.dumps(config, indent=2)
+    )
+    (paths.latest_dir / "accuracy.json").write_text(
+        json.dumps({"average_accuracy": avg_acc, "per_seed": per_seed}, indent=2)
+    )
+
+    write_metadata(
+        paths,
+        config=config,
+        metrics={"average_accuracy": avg_acc, "per_seed": per_seed},
+    )
+
+    if not args.no_snapshot:
+        snapshot_latest(paths)
+
     print("=" * 60)
     print("Training complete!")
-    print(f"  Models saved to: {MODELS_DIR}")
-    print(f"  Database:        {RESULTS_DB}")
-    print()
-    print("Run 'python run_analysis.py' to generate biomarker reports.")
+    print(f"  Models saved to: {paths.models_dir}")
+    print(f"  Database:        {paths.db_path}")
     print("=" * 60)
+
+
+def main() -> None:
+    run_training(parse_args())
 
 
 if __name__ == "__main__":

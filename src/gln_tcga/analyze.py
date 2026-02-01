@@ -5,7 +5,6 @@ Uses Integrated Gradients to compute gene importance - measuring how much
 each gene contributes to the model's tumor vs normal predictions.
 """
 
-import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -13,10 +12,6 @@ import numpy as np
 import pandas as pd
 import torch
 from tqdm import tqdm
-
-# Add project root to path for gln imports
-PROJECT_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 import gln
 
@@ -264,7 +259,7 @@ def plot_known_cancer_genes(
     known_genes: list[str] | None = None,
     output_path: str | Path | None = None,
     title: str = "Known Breast Cancer Genes - Attribution Importance",
-) -> plt.Figure:
+) -> plt.Figure | None:
     """Highlight known breast cancer genes in the importance ranking.
 
     Args:
@@ -390,7 +385,7 @@ def generate_report(
     print("\nComputing gene importance via Integrated Gradients...")
     print(f"  Baseline type: {baseline_type}")
     print("  (Measuring actual contribution to tumor vs normal prediction)")
-    importance_df, attributions = extract_gene_importance(
+    importance_df, _ = extract_gene_importance(
         model,
         transf,
         X,
@@ -425,7 +420,7 @@ def generate_report(
     print("\n" + "-" * 40)
     print("Top 10 Most Important Genes:")
     print("-" * 40)
-    for i, row in importance_df.head(10).iterrows():
+    for _, row in importance_df.head(10).iterrows():
         print(
             f"  {row['rank']:3d}. {row['gene']:12s}  (importance: {row['importance']:.4f})"
         )
@@ -449,33 +444,3 @@ def generate_report(
     print("=" * 60)
 
     return importance_df
-
-
-if __name__ == "__main__":
-    # Test with a dummy model
-    print("Testing analyze.py...")
-
-    # Create dummy model
-    model = gln.GLN(
-        input_size=100,
-        layer_sizes=[20, 10],
-        context_dimension=4,
-    )
-
-    # Dummy transformer
-    transf = gln.InputTransformer()
-    X_dummy = torch.randn(50, 100).abs()  # Dummy expression data (positive values)
-    transf.fit(X_dummy)
-
-    # Dummy gene names
-    gene_names = [f"GENE{i}" for i in range(100)]
-    gene_names[0] = "BRCA1"
-    gene_names[1] = "TP53"
-    gene_names[2] = "ERBB2"
-
-    # Generate report
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        importance_df = generate_report(model, transf, X_dummy, gene_names, tmpdir)
-        print(f"\nTop 5 genes:\n{importance_df.head()}")

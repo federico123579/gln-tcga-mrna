@@ -26,56 +26,78 @@ git lfs install
 
 ## Usage
 
+### Project Layout
+
+- src/gln_tcga/ - library modules (dataset, training, analysis, experiments)
+- src/gln_tcga/cli/ - CLI entry points (gln-train, gln-analyze, gln-experiment)
+- experiments/ - experiment outputs and snapshots
+
+This repository is a uv workspace with a src-based package and CLI entry points.
+The GLN library is provided by the workspace member in gated-linear-networks.
+
+### Install
+
+```bash
+uv sync
+```
+
 ### Option 1: Full Pipeline
 
 ```bash
 # Run training + analysis in one command
-uv run python run_experiment.py
+uv run gln-experiment --experiment exp01
+
+# Pass training options through to the training step
+uv run gln-experiment --experiment exp01 --train-args -- --epochs 20 --lr 0.005
 ```
 
 ### Option 2: Separate Steps (recommended)
 
 ```bash
 # Step 1: Train models with different seeds
-uv run python train_models.py
+uv run gln-train --experiment exp01
 
 # Step 2: Run biomarker analysis on best model
-uv run python run_analysis.py
+uv run gln-analyze --experiment exp01
 ```
 
 ### Command Line Options
 
 ```bash
 # Train with custom parameters
-uv run python train_models.py --seeds 42 43 --epochs 20 --lr 0.005
+uv run gln-train --experiment exp01 --seeds 42 43 --epochs 20 --lr 0.005
 
-# List available trained models
-uv run python run_analysis.py --list
+# List available experiments
+uv run gln-analyze --list-experiments
+
+# List available trained models for an experiment
+uv run gln-analyze --experiment exp01 --list
 
 # Analyze specific model
-uv run python run_analysis.py --seed 42
+uv run gln-analyze --experiment exp01 --seed 42
 
 # Analyze all models
-uv run python run_analysis.py --all
+uv run gln-analyze --experiment exp01 --all
 ```
 
 On first run, the data will be automatically downloaded from cBioPortal DataHub (~150MB for required files).
 
 ## Output
 
-After running, you'll find:
+Experiments are stored under experiments/NAME with a latest alias and snapshots:
 
-- `models/` - Saved model checkpoints (`gln_seed*.pt`)
-- `results/` - Biomarker analysis plots and gene importance CSV
-- `results.db` - SQLite database with experiment results
+- experiments/NAME/latest/models/ - Saved model checkpoints (gln_seed*.pt)
+- experiments/NAME/latest/results/ - Biomarker analysis plots and gene importance CSV
+- experiments/NAME/latest/results.db - SQLite database with experiment results
+- experiments/NAME/runs/TIMESTAMP/ - Snapshot of each training run
 
 ## Query Results
 
 ```python
-from results import get_results_df, init_database
+from gln_tcga.results import get_results_df, init_database
 
 # Load all results as DataFrame
-conn = init_database("results.db")
+conn = init_database("experiments/exp01/latest/results.db")
 df = get_results_df(conn)
 print(df)
 conn.close()
@@ -84,9 +106,9 @@ conn.close()
 ## Load Saved Model
 
 ```python
-from train import load_model
+from gln_tcga.train import load_model
 
-model, transformer, config = load_model("models/gln_seed42.pt")
+model, transformer, config = load_model("experiments/exp01/latest/models/gln_seed42.pt")
 ```
 
 ## Biomarker Analysis

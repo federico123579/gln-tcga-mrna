@@ -4,37 +4,44 @@ Run biomarker analysis on trained GLN models.
 
 Loads saved models from the database/checkpoints and generates
 gene importance reports using Integrated Gradients.
-
-Usage:
-    python run_analysis.py                    # Analyze best model
-    python run_analysis.py --seed 42          # Analyze specific seed
-    python run_analysis.py --all              # Analyze all models
-    python run_analysis.py --list             # List available models
 """
+
+from __future__ import annotations
 
 import argparse
 from pathlib import Path
-
 import polars as pl
-from analyze import generate_report
-from dataset import load_tcga_tumor_vs_normal
-from results import get_results_df, init_database
-from train import load_model
 
-# =============================================================================
-# Paths
-# =============================================================================
-
-EXPERIMENT_DIR = Path(__file__).parent
-RESULTS_DB = EXPERIMENT_DIR / "results.db"
-MODELS_DIR = EXPERIMENT_DIR / "models"
-RESULTS_DIR = EXPERIMENT_DIR / "results"
+from gln_tcga.analyze import generate_report
+from gln_tcga.dataset import load_tcga_tumor_vs_normal
+from gln_tcga.experiments import (
+    ExperimentInfo,
+    list_experiments,
+    load_legacy_accuracy,
+    load_legacy_config,
+    resolve_experiment,
+    resolve_run_dir,
+)
+from gln_tcga.results import get_results_df, init_database
+from gln_tcga.train import load_model
 
 
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
         description="Run biomarker analysis on trained GLN models"
+    )
+    parser.add_argument(
+        "--experiment",
+        type=str,
+        default="default",
+        help="Experiment name (default: default)",
+    )
+    parser.add_argument(
+        "--run",
+        type=str,
+        default="latest",
+        help="Run id (timestamp) or 'latest' (default: latest)",
     )
     parser.add_argument(
         "--seed",
@@ -53,9 +60,13 @@ def parse_args() -> argparse.Namespace:
         help="List available models and their metrics",
     )
     parser.add_argument(
+        "--list-experiments",
+        action="store_true",
+        help="List available experiments",
+    )
+    parser.add_argument(
         "--best",
         action="store_true",
-        default=True,
         help="Analyze the best model (default behavior)",
     )
     parser.add_argument(
@@ -93,7 +104,7 @@ def list_models(results_df: pl.DataFrame) -> None:
     print("=" * 70)
 
     if results_df.is_empty():
-        print("\nNo trained models found. Run 'python train_models.py' first.")
+        print("\nNo trained models found. Run training first.")
         return
 
     # Sort by accuracy descending
@@ -115,6 +126,21 @@ def list_models(results_df: pl.DataFrame) -> None:
     avg_acc = results_df["accuracy"].mean()
     print(f"{'Average':<8} {avg_acc:<12.4f}")
     print()
+
+
+def list_experiments_cli(experiments: list[ExperimentInfo]) -> None:
+    print("\n" + "=" * 70)
+    print("Available Experiments")
+    print("=" * 70)
+
+    if not experiments:
+        print("\nNo experiments found in the experiments directory.")
+        return
+
+    for info in experiments:
+        kind = "workspace" if info.kind == "workspace" else "legacy"
+        latest = info.latest_dir.name if info.latest_dir else "-"
+        print(f"- {info.name} ({kind}) latest={latest}")
 
 
 def analyze_model(
@@ -152,26 +178,96 @@ def analyze_model(
     )
 
 
-def main():
-    args = parse_args()
+def resolve_model_path(model_value: str, run_dir: Path, models_dir: Path) -> Path:
+    path = Path(model_value)
+    if path.is_absolute() and path.exists():
+        return path
+
+    if not path.is_absolute():
+        candidate = run_dir / path
+        if candidate.exists():
+            return candidate
+
+    candidate = models_dir / path.name
+    if candidate.exists():
+        return candidate
+
+    return path
+
+
+def analyze_legacy_experiment(
+    experiment_root: Path,
+    args: argparse.Namespace,
+) -> None:
+    config = load_legacy_config(experiment_root)
+    accuracy = load_legacy_accuracy(experiment_root)
+    model_path = experiment_root / "model.pt"
+
+    if not model_path.exists():
+        print(f"Error: Model file not found: {model_path}")
+        return
+
+    seed = config.get("seeds", 0)
+    print("=" * 60)
+    print("TCGA Breast Cancer: Biomarker Analysis (Legacy)")
+    print("=" * 60)
+    print(f"Experiment: {experiment_root.name}")
+    if accuracy is not None:
+        print(f"Accuracy: {accuracy}")
+
+    dataset = load_tcga_tumor_vs_normal()
+
+    results_dir = experiment_root / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    analyze_model(
+        int(seed) if isinstance(seed, int) else 0,
+        model_path,
+        dataset,
+        results_dir,
+        n_steps=args.n_steps,
+        batch_size=args.batch_size,
+        device=args.device,
+        baseline_type=args.baseline,
+    )
+
+
+def run_analysis(args: argparse.Namespace) -> None:
+    if args.list_experiments:
+        list_experiments_cli(list_experiments())
+        return
+
+    if not (args.all or args.seed is not None or args.list or args.best):
+        args.best = True
+
+    paths = resolve_experiment(args.experiment, create=False)
+
+    # Legacy experiment fallback
+    if not paths.latest_dir.exists() and (paths.root / "model.pt").exists():
+        analyze_legacy_experiment(paths.root, args)
+        return
+
+    run_dir = resolve_run_dir(paths, args.run)
+    results_db = run_dir / "results.db"
+    models_dir = run_dir / "models"
+    results_dir = run_dir / "results"
 
     # Check if database exists
-    if not RESULTS_DB.exists():
+    if not results_db.exists():
         print("Error: No results database found.")
-        print("Run 'python train_models.py' first to train models.")
+        print("Run training first or check the experiment/run selection.")
         return
 
     # Load results from database
-    conn = init_database(RESULTS_DB)
+    conn = init_database(results_db)
     results_df = get_results_df(conn)
     conn.close()
 
     if results_df.is_empty():
         print("Error: No trained models found in database.")
-        print("Run 'python train_models.py' first to train models.")
+        print("Run training first.")
         return
 
-    # List models mode
     if args.list:
         list_models(results_df)
         return
@@ -179,6 +275,8 @@ def main():
     print("=" * 60)
     print("TCGA Breast Cancer: Biomarker Analysis")
     print("=" * 60)
+    print(f"Experiment: {paths.name}")
+    print(f"Run: {args.run}")
 
     # Load dataset for analysis
     print("\nLoading TCGA mRNA expression data...")
@@ -186,20 +284,20 @@ def main():
     print(f"  {dataset}")
 
     # Ensure output directory exists
-    RESULTS_DIR.mkdir(exist_ok=True)
+    results_dir.mkdir(exist_ok=True)
 
     if args.all:
         # Analyze all models
         print(f"\nAnalyzing all {len(results_df)} models...")
         for row in results_df.iter_rows(named=True):
             seed = row["seed"]
-            model_path = Path(row["model_path"])
+            model_path = resolve_model_path(row["model_path"], run_dir, models_dir)
             if model_path.exists():
                 analyze_model(
                     seed,
                     model_path,
                     dataset,
-                    RESULTS_DIR,
+                    results_dir,
                     n_steps=args.n_steps,
                     batch_size=args.batch_size,
                     device=args.device,
@@ -209,7 +307,6 @@ def main():
                 print(f"  Warning: Model file not found: {model_path}")
 
     elif args.seed is not None:
-        # Analyze specific seed
         matches = results_df.filter(pl.col("seed") == args.seed)
         if matches.is_empty():
             print(f"Error: No model found with seed {args.seed}")
@@ -217,7 +314,8 @@ def main():
             return
 
         row = matches.row(0, named=True)
-        model_path = Path(row["model_path"])
+        model_path = resolve_model_path(row["model_path"], run_dir, models_dir)
+
         if not model_path.exists():
             print(f"Error: Model file not found: {model_path}")
             return
@@ -226,7 +324,7 @@ def main():
             args.seed,
             model_path,
             dataset,
-            RESULTS_DIR,
+            results_dir,
             n_steps=args.n_steps,
             batch_size=args.batch_size,
             device=args.device,
@@ -238,7 +336,7 @@ def main():
         best_row = results_df.sort("accuracy", descending=True).row(0, named=True)
         seed = best_row["seed"]
         accuracy = best_row["accuracy"]
-        model_path = Path(best_row["model_path"])
+        model_path = resolve_model_path(best_row["model_path"], run_dir, models_dir)
 
         print(f"\nBest model: seed={seed}, accuracy={accuracy:.4f}")
 
@@ -250,7 +348,7 @@ def main():
             seed,
             model_path,
             dataset,
-            RESULTS_DIR,
+            results_dir,
             n_steps=args.n_steps,
             batch_size=args.batch_size,
             device=args.device,
@@ -260,8 +358,12 @@ def main():
     print()
     print("=" * 60)
     print("Analysis complete!")
-    print(f"  Results saved to: {RESULTS_DIR}")
+    print(f"  Results saved to: {results_dir}")
     print("=" * 60)
+
+
+def main() -> None:
+    run_analysis(parse_args())
 
 
 if __name__ == "__main__":

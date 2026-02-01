@@ -2,7 +2,6 @@
 Training utilities for GLN on TCGA data.
 """
 
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -11,10 +10,6 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import LinearLR
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
-
-# Add project root to path for gln imports
-PROJECT_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 import gln
 
@@ -195,7 +190,7 @@ def train_gln(
     if verbose:
         epoch_iter = tqdm(epoch_iter, desc="Training", unit="epoch")
 
-    for epoch in epoch_iter:
+    for _ in epoch_iter:
         epoch_loss = 0.0
         n_batches = 0
 
@@ -218,11 +213,11 @@ def train_gln(
             epoch_loss += loss.item()
             n_batches += 1
 
-        if verbose:
+        if verbose and n_batches > 0:
             avg_loss = epoch_loss / n_batches
-            epoch_iter.set_postfix(loss=f"{avg_loss:.4f}")
+            tqdm.write(f"Epoch loss: {avg_loss:.4f}")
 
-    # Evaluate accuracy
-    accuracy = binary_accuracy(model, transf, test_dl, device=device)
+    # Evaluate accuracy on test set
+    test_acc = binary_accuracy(model, transf, test_dl, device=device)
 
-    return model, transf, accuracy
+    return model, transf, test_acc

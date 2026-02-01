@@ -26,7 +26,8 @@ def init_database(db_path: str | Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS results (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             seed INTEGER NOT NULL,
@@ -43,7 +44,8 @@ def init_database(db_path: str | Path) -> sqlite3.Connection:
             model_path TEXT,
             timestamp TEXT NOT NULL
         )
-    """)
+    """
+    )
 
     conn.commit()
     return conn
@@ -182,45 +184,3 @@ def get_results_df(conn: sqlite3.Connection) -> pl.DataFrame:
 
     df = pl.DataFrame(rows, schema=columns, orient="row")
     return df
-
-
-if __name__ == "__main__":
-    # Quick test
-    import tempfile
-
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-        db_path = f.name
-
-    conn = init_database(db_path)
-
-    # Insert test result
-    result = {
-        "seed": 42,
-        "accuracy": 0.95,
-        "training_time": 10.5,
-        "layer_sizes": [50, 25],
-        "context_dimension": 8,
-        "learning_rate": 0.01,
-        "num_epochs": 10,
-        "batch_size": 32,
-        "n_train_samples": 800,
-        "n_test_samples": 200,
-        "n_genes": 20000,
-        "model_path": "models/gln_seed42.pt",
-    }
-
-    row_id = save_result(conn, result)
-    print(f"Inserted row with ID: {row_id}")
-
-    conn.close()
-
-    # Query results
-    df = query_results(db_path)
-    print(df)
-
-    # Get summary
-    summary = get_summary_stats(db_path)
-    print(f"Summary: {summary}")
-
-    # Cleanup
-    Path(db_path).unlink()
