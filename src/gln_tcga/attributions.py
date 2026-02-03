@@ -21,8 +21,13 @@ from tqdm import tqdm
 
 from gln_tcga.plotting import (
     KNOWN_CANCER_GENES,
+    plot_contribution_violin,
+    plot_gate_usage_heatmap,
+    plot_gene_contrib_vs_logit,
     plot_known_cancer_genes,
+    plot_rank_correlation_highlight,
     plot_sample_saliency,
+    plot_sample_waterfall,
     plot_top_genes,
 )
 
@@ -243,6 +248,79 @@ def _summarize_contributions_by_class(
         df["mean_abs_contrib_y1"] - df["mean_abs_contrib_y0"]
     )
     return df
+
+
+def compute_gln_gate_usage(
+    model: gln.GLN,
+    transformer: gln.InputTransformer,
+    X: torch.Tensor,
+    y: torch.Tensor,
+    *,
+    batch_size: int = 64,
+) -> pd.DataFrame:
+    """Compute gate usage frequency per layer and class.
+
+    Args:
+        model: Trained GLN model.
+        transformer: Fitted InputTransformer.
+        X: Raw input tensor (before transformation).
+        y: Target labels.
+        batch_size: Batch size for processing.
+
+    Returns:
+        DataFrame with columns: layer, class, gate_index, count, frequency.
+    """
+    model.eval()
+    device = next(model.parameters()).device
+
+    layers = list(model.layers) + [model.out_layer]
+    layer_names = [f"layer_{i}" for i in range(len(model.layers))] + ["out_layer"]
+    n_gates = 2**model.context_dimension
+
+    counts: dict[str, dict[int, np.ndarray]] = {
+        name: {
+            0: np.zeros(n_gates, dtype=np.int64),
+            1: np.zeros(n_gates, dtype=np.int64),
+        }
+        for name in layer_names
+    }
+
+    n_samples = X.shape[0]
+    batch_iter = range(0, n_samples, batch_size)
+    batch_iter = tqdm(batch_iter, desc="Computing gate usage", unit="batch")
+
+    for i in batch_iter:
+        batch_X = X[i : i + batch_size].cpu()
+        batch_y = y[i : i + batch_size].detach().cpu().numpy().astype(int)
+
+        context = transformer.transform(batch_X).to(device)
+
+        for layer, name in zip(layers, layer_names):
+            idx = layer._slicing_indexes(context).detach().cpu()
+            for label in (0, 1):
+                mask = batch_y == label
+                if not np.any(mask):
+                    continue
+                values = idx[mask].reshape(-1).numpy()
+                counts[name][label] += np.bincount(values, minlength=n_gates)
+
+    rows = []
+    for name in layer_names:
+        for label in (0, 1):
+            total = counts[name][label].sum()
+            freq = counts[name][label] / total if total > 0 else np.zeros(n_gates)
+            for gate_index in range(n_gates):
+                rows.append(
+                    {
+                        "layer": name,
+                        "class": label,
+                        "gate_index": gate_index,
+                        "count": int(counts[name][label][gate_index]),
+                        "frequency": float(freq[gate_index]),
+                    }
+                )
+
+    return pd.DataFrame(rows)
 
 
 def compute_integrated_gradients(
@@ -755,6 +833,11 @@ def generate_attributions_report(
         by_class.to_csv(by_class_path, index=False)
         print(f"Saved class-conditional saliency contributions to: {by_class_path}")
 
+        merged_sal = saliency_df.merge(by_class, on="gene", how="left")
+        merged_path = output_dir / "saliency_importance_with_class.csv"
+        merged_sal.to_csv(merged_path, index=False)
+        print(f"Saved merged saliency table to: {merged_path}")
+
         print("\nTop 10 genes by GLN Saliency (ranked by mean |contribution|):")
         for _, row in saliency_df.head(10).iterrows():
             direction = "+" if row["direction"] > 0 else "-"
@@ -776,6 +859,38 @@ def generate_attributions_report(
             title="Known Breast Cancer Genes - GLN Saliency (mean |contribution|)",
         )
 
+        top_scatter_genes = saliency_df["gene"].head(6).tolist()
+        top_violin_genes = saliency_df["gene"].head(10).tolist()
+
+        x_cpu = X.detach().cpu()
+        logit_inputs = (x_cpu - transformer.means.cpu()) / transformer.stds.cpu()
+        contribs_np = saliency_contribs.detach().cpu().numpy()
+        y_np = y.detach().cpu().numpy().astype(int)
+        gene_to_idx = {g: i for i, g in enumerate(gene_names)}
+
+        scatter_dir = output_dir / "saliency_scatter"
+        for gene in top_scatter_genes:
+            idx = gene_to_idx.get(gene)
+            if idx is None:
+                continue
+            plot_gene_contrib_vs_logit(
+                logit_inputs[:, idx].numpy(),
+                contribs_np[:, idx],
+                y_np,
+                gene=gene,
+                output_path=scatter_dir / f"contrib_vs_logit_{gene}.png",
+                title=f"Contribution vs Expression: {gene}",
+            )
+
+        plot_contribution_violin(
+            contribs_np,
+            y_np,
+            gene_names,
+            top_genes=top_violin_genes,
+            output_path=output_dir / "saliency_contrib_violin.png",
+            title="Class-conditional Contribution Distributions (Top genes)",
+        )
+
         # Sample-level saliency maps (one-vs-all in logit space)
         if saliency_samples_per_class > 0:
             print("\nGenerating sample-level saliency maps...")
@@ -790,7 +905,7 @@ def generate_attributions_report(
                     probs.append(batch_probs)
             probs = torch.cat(probs, dim=0)
 
-            y_np = y.detach().cpu().numpy()
+            y_np = y.detach().cpu().numpy().astype(int)
             probs_np = probs.numpy()
 
             sample_indices: list[int] = []
@@ -821,6 +936,16 @@ def generate_attributions_report(
                     title=title,
                 )
 
+                plot_sample_waterfall(
+                    weights,
+                    gene_names,
+                    output_path=output_dir
+                    / f"saliency_sample_{idx}_label_{label}_waterfall.png",
+                    title=title,
+                    top_n_pos=15,
+                    top_n_neg=15,
+                )
+
                 top_df = pd.DataFrame(
                     {
                         "gene": gene_names[: len(weights)],
@@ -835,6 +960,23 @@ def generate_attributions_report(
 
         results["saliency_weights"] = saliency_weights
         results["saliency_contribs"] = saliency_contribs
+
+        gate_df = compute_gln_gate_usage(
+            model,
+            transformer,
+            X,
+            y,
+            batch_size=batch_size,
+        )
+        gate_path = output_dir / "gate_usage.csv"
+        gate_df.to_csv(gate_path, index=False)
+        print(f"Saved gate usage stats to: {gate_path}")
+
+        plot_gate_usage_heatmap(
+            gate_df,
+            output_dir=output_dir / "gate_usage",
+            title_prefix="Gate Usage",
+        )
 
     # Correlation between IG and saliency
     if compute_correlation and {"ig", "saliency"}.issubset(methods):
@@ -866,6 +1008,16 @@ def generate_attributions_report(
         print(f"P-value: {corr['p_value']:.2e}")
         print(
             f"Top-100 overlap: {overlap['overlap']} (Jaccard={overlap['jaccard']:.3f})"
+        )
+
+        plot_rank_correlation_highlight(
+            results["ig_df"],
+            results["saliency_df"],
+            label_a="IG",
+            label_b="GLN Saliency",
+            known_genes=KNOWN_CANCER_GENES,
+            output_path=output_dir / "rank_correlation_saliency_highlight.png",
+            title="IG vs GLN Saliency (highlighted)",
         )
 
     return results

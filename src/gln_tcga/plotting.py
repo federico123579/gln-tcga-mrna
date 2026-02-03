@@ -582,3 +582,366 @@ def plot_known_cancer_genes(
         print(f"Saved plot to: {output_path}")
 
     return fig
+
+
+def plot_gene_contrib_vs_logit(
+    logit_values: np.ndarray,
+    contributions: np.ndarray,
+    labels: np.ndarray,
+    *,
+    gene: str,
+    output_path: str | Path | None = None,
+    title: str | None = None,
+) -> plt.Figure:
+    """Scatter plot of contribution vs logit input for a single gene.
+
+    Args:
+        logit_values: Array of logit inputs for the gene (n_samples,).
+        contributions: Array of contributions for the gene (n_samples,).
+        labels: Binary labels (n_samples,).
+        gene: Gene name.
+        output_path: Path to save the figure (optional).
+        title: Plot title (optional).
+
+    Returns:
+        Matplotlib Figure object.
+    """
+    fig, ax = plt.subplots(figsize=(6, 5))
+
+    labels = np.asarray(labels)
+    mask0 = labels == 0
+    mask1 = labels == 1
+
+    ax.scatter(
+        logit_values[mask0],
+        contributions[mask0],
+        s=12,
+        alpha=0.5,
+        c="steelblue",
+        label="Normal",
+        edgecolor="none",
+    )
+    ax.scatter(
+        logit_values[mask1],
+        contributions[mask1],
+        s=12,
+        alpha=0.5,
+        c="indianred",
+        label="Tumor",
+        edgecolor="none",
+    )
+
+    ax.axhline(0, color="black", linewidth=0.8, alpha=0.5)
+    ax.set_xlabel("Logit input (normalized expression)")
+    ax.set_ylabel("Contribution to logit")
+    ax.set_title(title or f"Contribution vs Expression: {gene}")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+
+    if output_path:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+        print(f"Saved contribution vs logit plot to: {output_path}")
+
+    return fig
+
+
+def plot_contribution_violin(
+    contributions: np.ndarray,
+    labels: np.ndarray,
+    gene_names: list[str],
+    *,
+    top_genes: list[str],
+    output_path: str | Path | None = None,
+    title: str = "Class-conditional Contribution Distributions",
+) -> plt.Figure:
+    """Plot violin distributions of contributions per class for selected genes.
+
+    Args:
+        contributions: Array (n_samples, n_genes) of signed contributions.
+        labels: Binary labels (n_samples,).
+        gene_names: Gene name list.
+        top_genes: List of genes to include.
+        output_path: Path to save the figure (optional).
+        title: Plot title.
+
+    Returns:
+        Matplotlib Figure object.
+    """
+    labels = np.asarray(labels)
+    gene_to_idx = {g: i for i, g in enumerate(gene_names)}
+
+    fig, ax = plt.subplots(figsize=(max(8, len(top_genes) * 1.2), 6))
+
+    positions = []
+    data = []
+    colors = []
+    tick_positions = []
+    tick_labels = []
+
+    for i, gene in enumerate(top_genes):
+        if gene not in gene_to_idx:
+            continue
+        idx = gene_to_idx[gene]
+        contrib = contributions[:, idx]
+
+        data.append(contrib[labels == 0])
+        positions.append(i * 2.0)
+        colors.append("steelblue")
+
+        data.append(contrib[labels == 1])
+        positions.append(i * 2.0 + 0.8)
+        colors.append("indianred")
+
+        tick_positions.append(i * 2.0 + 0.4)
+        tick_labels.append(gene)
+
+    parts = ax.violinplot(data, positions=positions, showmeans=False, showmedians=True)
+
+    for body, color in zip(parts["bodies"], colors):
+        body.set_facecolor(color)
+        body.set_edgecolor("black")
+        body.set_alpha(0.7)
+
+    ax.set_xticks(tick_positions)
+    ax.set_xticklabels(tick_labels, rotation=45, ha="right")
+    ax.set_ylabel("Signed contribution")
+    ax.set_title(title)
+    ax.grid(axis="y", alpha=0.3)
+
+    from matplotlib.patches import Patch
+
+    legend_elements = [
+        Patch(facecolor="steelblue", edgecolor="black", label="Normal"),
+        Patch(facecolor="indianred", edgecolor="black", label="Tumor"),
+    ]
+    ax.legend(handles=legend_elements, loc="upper right")
+
+    plt.tight_layout()
+
+    if output_path:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+        print(f"Saved contribution violin plot to: {output_path}")
+
+    return fig
+
+
+def plot_sample_waterfall(
+    contributions: np.ndarray,
+    gene_names: list[str],
+    *,
+    output_path: str | Path | None = None,
+    title: str = "Sample Contribution Waterfall",
+    top_n_pos: int = 15,
+    top_n_neg: int = 15,
+) -> plt.Figure:
+    """Plot a waterfall-style bar chart of top positive/negative contributions.
+
+    Args:
+        contributions: Array (n_genes,) of signed contributions.
+        gene_names: Gene name list.
+        output_path: Path to save the figure (optional).
+        title: Plot title.
+        top_n_pos: Number of top positive contributors to show.
+        top_n_neg: Number of top negative contributors to show.
+
+    Returns:
+        Matplotlib Figure object.
+    """
+    df = pd.DataFrame(
+        {
+            "gene": gene_names[: len(contributions)],
+            "contribution": contributions,
+        }
+    )
+
+    top_pos = df.sort_values("contribution", ascending=False).head(top_n_pos)
+    top_neg = df.sort_values("contribution", ascending=True).head(top_n_neg)
+
+    combined = pd.concat([top_neg, top_pos], axis=0)
+    combined = combined.sort_values("contribution", ascending=True)
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    colors = ["steelblue" if v < 0 else "indianred" for v in combined["contribution"]]
+
+    ax.barh(
+        combined["gene"],
+        combined["contribution"],
+        color=colors,
+        edgecolor="black",
+    )
+    ax.axvline(0, color="black", linewidth=0.8)
+    ax.set_xlabel("Contribution to logit")
+    ax.set_title(title)
+    ax.grid(axis="x", alpha=0.3)
+
+    plt.tight_layout()
+
+    if output_path:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+        print(f"Saved sample waterfall plot to: {output_path}")
+
+    return fig
+
+
+def plot_rank_correlation_highlight(
+    df_a: pd.DataFrame,
+    df_b: pd.DataFrame,
+    *,
+    label_a: str = "Method A",
+    label_b: str = "Method B",
+    known_genes: list[str] | None = None,
+    output_path: str | Path | None = None,
+    title: str = "Rank Correlation (highlighted)",
+) -> plt.Figure:
+    """Scatter plot of ranks with highlighted gene families and known markers."""
+    import re
+
+    if known_genes is None:
+        known_genes = []
+
+    merged = df_a[["gene", "rank"]].merge(
+        df_b[["gene", "rank"]],
+        on="gene",
+        suffixes=("_a", "_b"),
+    )
+
+    def flag_family(gene: str) -> str | None:
+        g = gene.upper()
+        if re.fullmatch(r"OR\d+[A-Z0-9\-]*", g) or g.startswith("OR"):
+            return "olfactory_receptor"
+        if g.startswith("KRTAP"):
+            return "krtap"
+        if g.startswith("SNAR"):
+            return "snar"
+        return None
+
+    merged["family"] = merged["gene"].map(flag_family)
+    merged["is_known"] = merged["gene"].isin(known_genes)
+
+    fig, ax = plt.subplots(figsize=(9, 9))
+
+    # Base points
+    base = merged[~merged["is_known"] & merged["family"].isna()]
+    ax.scatter(
+        base["rank_a"],
+        base["rank_b"],
+        alpha=0.4,
+        s=14,
+        c="gray",
+        label="Other",
+        edgecolor="none",
+    )
+
+    # Known genes
+    known = merged[merged["is_known"]]
+    ax.scatter(
+        known["rank_a"],
+        known["rank_b"],
+        alpha=0.8,
+        s=30,
+        c="forestgreen",
+        label="Known cancer genes",
+        edgecolor="black",
+        linewidth=0.3,
+    )
+
+    # Suspicious families
+    family_colors = {
+        "olfactory_receptor": "goldenrod",
+        "krtap": "mediumpurple",
+        "snar": "tomato",
+    }
+    for fam, color in family_colors.items():
+        fam_df = merged[merged["family"] == fam]
+        if fam_df.empty:
+            continue
+        ax.scatter(
+            fam_df["rank_a"],
+            fam_df["rank_b"],
+            alpha=0.7,
+            s=20,
+            c=color,
+            label=fam,
+            edgecolor="none",
+        )
+
+    max_rank = max(merged["rank_a"].max(), merged["rank_b"].max())
+    ax.plot([0, max_rank], [0, max_rank], "k--", alpha=0.4)
+    ax.set_xlabel(f"{label_a} Rank")
+    ax.set_ylabel(f"{label_b} Rank")
+    ax.set_title(title)
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    ax.set_aspect("equal")
+
+    plt.tight_layout()
+
+    if output_path:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+        print(f"Saved highlighted rank correlation plot to: {output_path}")
+
+    return fig
+
+
+def plot_gate_usage_heatmap(
+    usage_df: pd.DataFrame,
+    *,
+    output_dir: str | Path | None = None,
+    title_prefix: str = "Gate Usage",
+) -> list[plt.Figure]:
+    """Plot per-layer gate usage heatmaps for each class.
+
+    Args:
+        usage_df: DataFrame with columns [layer, class, gate_index, frequency].
+        output_dir: Directory to save figures (optional).
+        title_prefix: Prefix for plot titles.
+
+    Returns:
+        List of Matplotlib Figure objects.
+    """
+    figs: list[plt.Figure] = []
+
+    for layer in sorted(usage_df["layer"].unique()):
+        layer_df = usage_df[usage_df["layer"] == layer]
+
+        classes = sorted(layer_df["class"].unique())
+        gate_indices = sorted(layer_df["gate_index"].unique())
+
+        heat = np.zeros((len(classes), len(gate_indices)))
+        for i, cls in enumerate(classes):
+            cls_df = layer_df[layer_df["class"] == cls]
+            freq_map = dict(zip(cls_df["gate_index"], cls_df["frequency"]))
+            heat[i, :] = [freq_map.get(g, 0.0) for g in gate_indices]
+
+        fig, ax = plt.subplots(figsize=(12, 3))
+        im = ax.imshow(heat, aspect="auto", cmap="viridis")
+        ax.set_yticks(range(len(classes)))
+        ax.set_yticklabels(["Normal" if c == 0 else "Tumor" for c in classes])
+        ax.set_xticks(range(len(gate_indices)))
+        ax.set_xticklabels(gate_indices, rotation=90)
+        ax.set_xlabel("Gate index")
+        ax.set_title(f"{title_prefix} - {layer}")
+
+        fig.colorbar(im, ax=ax, fraction=0.02, pad=0.02, label="Frequency")
+        plt.tight_layout()
+
+        if output_dir:
+            output_dir = Path(output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            out_path = output_dir / f"gate_usage_{layer}.png"
+            fig.savefig(out_path, dpi=150, bbox_inches="tight")
+            print(f"Saved gate usage heatmap to: {out_path}")
+
+        figs.append(fig)
+
+    return figs
