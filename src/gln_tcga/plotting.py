@@ -12,11 +12,32 @@ from typing import TYPE_CHECKING, Any
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
 
 if TYPE_CHECKING:
     import pandas as pd
+
     from gln_tcga.baselines import CVResult
+
+
+# Known breast cancer-related genes for validation
+KNOWN_CANCER_GENES = [
+    "BRCA1",  # Breast cancer gene 1
+    "BRCA2",  # Breast cancer gene 2
+    "ERBB2",  # HER2/neu (growth factor receptor)
+    "TP53",  # Tumor suppressor
+    "ESR1",  # Estrogen receptor alpha
+    "PGR",  # Progesterone receptor
+    "MKI67",  # Proliferation marker (Ki-67)
+    "EGFR",  # Epidermal growth factor receptor
+    "MYC",  # Proto-oncogene
+    "PIK3CA",  # PI3K pathway
+    "CDH1",  # E-cadherin (invasion)
+    "PTEN",  # Tumor suppressor
+    "GATA3",  # Transcription factor (luminal)
+    "FOXA1",  # Transcription factor (hormone response)
+]
 
 
 def plot_training_curves(
@@ -341,5 +362,159 @@ def plot_rank_correlation(
         output_path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(output_path, dpi=150, bbox_inches="tight")
         print(f"Saved rank correlation plot to: {output_path}")
+
+    return fig
+
+
+def plot_top_genes(
+    importance_df: pd.DataFrame,
+    top_n: int = 20,
+    output_path: str | Path | None = None,
+    title: str = "Top Genes by Integrated Gradients Attribution",
+) -> plt.Figure:
+    """Create bar chart of top important genes.
+
+    Args:
+        importance_df: DataFrame with 'gene', 'importance', and 'direction' columns.
+        top_n: Number of top genes to plot.
+        output_path: Path to save the figure (optional).
+        title: Plot title.
+
+    Returns:
+        Matplotlib Figure object.
+    """
+    top_df = importance_df.head(top_n).copy()
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    # Color by direction: red = tumor-associated, blue = normal-associated
+    colors = []
+    for _, row in top_df.iloc[::-1].iterrows():
+        if "direction" in row and row["direction"] > 0:
+            colors.append("indianred")  # Tumor-associated
+        else:
+            colors.append("steelblue")  # Normal-associated
+
+    ax.barh(
+        top_df["gene"][::-1],
+        top_df["importance"][::-1],
+        color=colors,
+        edgecolor="black",
+    )
+
+    ax.set_xlabel("Importance (mean |attribution|)")
+    ax.set_ylabel("Gene")
+    ax.set_title(title)
+    ax.grid(axis="x", alpha=0.3)
+
+    # Add legend for direction
+    from matplotlib.patches import Patch
+
+    legend_elements = [
+        Patch(facecolor="indianred", edgecolor="black", label="Tumor-associated (+)"),
+        Patch(facecolor="steelblue", edgecolor="black", label="Normal-associated (-)"),
+    ]
+    ax.legend(handles=legend_elements, loc="lower right")
+
+    plt.tight_layout()
+
+    if output_path:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+        print(f"Saved plot to: {output_path}")
+
+    return fig
+
+
+def plot_known_cancer_genes(
+    importance_df: pd.DataFrame,
+    known_genes: list[str] | None = None,
+    output_path: str | Path | None = None,
+    title: str = "Known Breast Cancer Genes - Attribution Importance",
+) -> plt.Figure | None:
+    """Highlight known breast cancer genes in the importance ranking.
+
+    Args:
+        importance_df: DataFrame with 'gene', 'importance', and 'rank' columns.
+        known_genes: List of known cancer genes to highlight.
+        output_path: Path to save the figure (optional).
+        title: Plot title.
+
+    Returns:
+        Matplotlib Figure object.
+    """
+    if known_genes is None:
+        known_genes = KNOWN_CANCER_GENES
+
+    # Filter to known genes that are in the dataset
+    gene_set = set(importance_df["gene"])
+    found_genes = [g for g in known_genes if g in gene_set]
+    missing_genes = [g for g in known_genes if g not in gene_set]
+
+    if missing_genes:
+        print(
+            f"Warning: {len(missing_genes)} known genes not found in dataset: {missing_genes}"
+        )
+
+    # Get importance for found genes
+    known_df = importance_df[importance_df["gene"].isin(found_genes)].copy()
+    known_df = known_df.sort_values("importance", ascending=True)
+
+    if known_df.empty:
+        print("No known cancer genes found in dataset")
+        return None
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    # Color based on rank (top 100 = green, 100-1000 = yellow, >1000 = red)
+    colors = []
+    for rank in known_df["rank"]:
+        if rank <= 100:
+            colors.append("forestgreen")
+        elif rank <= 1000:
+            colors.append("gold")
+        else:
+            colors.append("tomato")
+
+    bars = ax.barh(
+        known_df["gene"],
+        known_df["importance"],
+        color=colors,
+        edgecolor="black",
+    )
+
+    # Add rank annotations
+    for bar, rank in zip(bars, known_df["rank"]):
+        ax.text(
+            bar.get_width() + 0.01 * ax.get_xlim()[1],
+            bar.get_y() + bar.get_height() / 2,
+            f"Rank: {rank}",
+            va="center",
+            fontsize=9,
+        )
+
+    ax.set_xlabel("Importance (mean |attribution|)")
+    ax.set_ylabel("Gene")
+    ax.set_title(title)
+    ax.grid(axis="x", alpha=0.3)
+
+    # Legend for colors
+    from matplotlib.patches import Patch
+
+    legend_elements = [
+        Patch(facecolor="forestgreen", edgecolor="black", label="Top 100"),
+        Patch(facecolor="gold", edgecolor="black", label="Rank 100-1000"),
+        Patch(facecolor="tomato", edgecolor="black", label="Rank > 1000"),
+    ]
+    ax.legend(handles=legend_elements, loc="lower right")
+
+    plt.tight_layout()
+
+    if output_path:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+        print(f"Saved plot to: {output_path}")
 
     return fig

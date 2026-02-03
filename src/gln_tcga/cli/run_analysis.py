@@ -14,7 +14,6 @@ from pathlib import Path
 import polars as pl
 import torch
 
-from gln_tcga.analyze import generate_report
 from gln_tcga.attributions import generate_attributions_report
 from gln_tcga.dataset import load_tcga_tumor_vs_normal
 from gln_tcga.experiments import (
@@ -201,49 +200,36 @@ def analyze_model(
     seed_output_dir = output_dir / f"seed_{seed}"
     seed_output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Choose between Captum-based or legacy analysis
-    if use_captum or method in ("permutation", "both"):
-        # Use Captum-based attribution methods
-        print(f"  Using Captum-based methods (method={method})")
+    # Captum-based attribution methods (legacy IG removed)
+    if not use_captum and method == "ig":
+        print("  Note: legacy IG was removed; using Captum IG by default")
+    print(f"  Using Captum-based methods (method={method})")
 
-        # If correlation is requested but method is not 'both', upgrade to 'both'
-        if compute_correlation and method != "both":
-            print("  Note: --correlation requires --method both, upgrading...")
-            method = "both"
+    # If correlation is requested but method is not 'both', upgrade to 'both'
+    if compute_correlation and method != "both":
+        print("  Note: --correlation requires --method both, upgrading...")
+        method = "both"
 
-        results = generate_attributions_report(
-            model,
-            transf,
-            dataset.X,
-            dataset.y,
-            dataset.gene_names,
-            seed_output_dir,
-            method=method,
-            compute_correlation=compute_correlation,
-            n_steps=n_steps,
-            batch_size=batch_size,
-            baseline_type=baseline_type,
-        )
+    results = generate_attributions_report(
+        model,
+        transf,
+        dataset.X,
+        dataset.y,
+        dataset.gene_names,
+        seed_output_dir,
+        method=method,
+        compute_correlation=compute_correlation,
+        n_steps=n_steps,
+        batch_size=batch_size,
+        baseline_type=baseline_type,
+    )
 
-        # Generate rank correlation plot if both methods were used
-        if method == "both" and "ig_df" in results and "perm_df" in results:
-            plot_rank_correlation(
-                results["ig_df"],
-                results["perm_df"],
-                output_path=seed_output_dir / "rank_correlation.png",
-            )
-    else:
-        # Use legacy analysis (IG only via generate_report)
-        generate_report(
-            model,
-            transf,
-            dataset.X,
-            dataset.gene_names,
-            seed_output_dir,
-            y=dataset.y,
-            n_steps=n_steps,
-            batch_size=batch_size,
-            baseline_type=baseline_type,
+    # Generate rank correlation plot if both methods were used
+    if method == "both" and "ig_df" in results and "perm_df" in results:
+        plot_rank_correlation(
+            results["ig_df"],
+            results["perm_df"],
+            output_path=seed_output_dir / "rank_correlation.png",
         )
 
     # Generate confusion matrix if requested and test data provided

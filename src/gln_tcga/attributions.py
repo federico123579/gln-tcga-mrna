@@ -19,6 +19,12 @@ from captum.attr import FeaturePermutation, IntegratedGradients
 from scipy import stats
 from tqdm import tqdm
 
+from gln_tcga.plotting import (
+    KNOWN_CANCER_GENES,
+    plot_known_cancer_genes,
+    plot_top_genes,
+)
+
 if TYPE_CHECKING:
     pass
 
@@ -62,6 +68,7 @@ def compute_integrated_gradients(
     X: torch.Tensor,
     gene_names: list[str],
     *,
+    y: torch.Tensor | None = None,
     baseline_type: str = "mean",
     n_steps: int = 50,
     batch_size: int = 64,
@@ -95,13 +102,37 @@ def compute_integrated_gradients(
     # Initialize Captum's IntegratedGradients
     ig = IntegratedGradients(wrapped_model)
 
-    # Choose baseline based on type
+    # Choose baseline based on type (RAW space, before transformation)
     if baseline_type == "mean":
-        # Use dataset mean as baseline - transforms to ~0.5 for all genes
+        # Use fitted mean as baseline - transforms to ~0.5 for many genes
         baseline = transformer.means.unsqueeze(0).expand(X.shape[0], -1)
-    else:
-        # Zero baseline in raw space
+    elif baseline_type == "normal":
+        if y is None:
+            warnings.warn(
+                "baseline_type='normal' requested but labels y were not provided; falling back to baseline_type='mean'.",
+                stacklevel=2,
+            )
+            baseline = transformer.means.unsqueeze(0).expand(X.shape[0], -1)
+        else:
+            normal_mask = y == 0
+            if int(normal_mask.sum()) > 0:
+                baseline = (
+                    X[normal_mask].mean(dim=0, keepdim=True).expand(X.shape[0], -1)
+                )
+            else:
+                warnings.warn(
+                    "baseline_type='normal' requested but no normal samples found (y==0); falling back to baseline_type='mean'.",
+                    stacklevel=2,
+                )
+                baseline = transformer.means.unsqueeze(0).expand(X.shape[0], -1)
+    elif baseline_type == "zero":
         baseline = torch.zeros_like(X)
+    else:
+        warnings.warn(
+            f"Unknown baseline_type={baseline_type!r}; falling back to baseline_type='mean'.",
+            stacklevel=2,
+        )
+        baseline = transformer.means.unsqueeze(0).expand(X.shape[0], -1)
 
     # Process in batches
     all_attributions = []
@@ -304,6 +335,7 @@ def generate_attributions_report(
             transformer,
             X,
             gene_names,
+            y=y,
             baseline_type=baseline_type,
             n_steps=n_steps,
             batch_size=batch_size,
@@ -323,6 +355,57 @@ def generate_attributions_report(
             print(
                 f"  {row['rank']:3d}. {row['gene']:12s} ({direction}) importance={row['importance']:.4f}"
             )
+
+        # Print known breast cancer gene ranks
+        print("\n" + "-" * 40)
+        print("Known Breast Cancer Genes Rankings:")
+        print("-" * 40)
+        known_rows = []
+        for gene in KNOWN_CANCER_GENES:
+            matches = ig_df[ig_df["gene"] == gene]
+            if not matches.empty:
+                row = matches.iloc[0]
+                print(
+                    f"  {gene:10s}: Rank {row['rank']:5d} (importance: {row['importance']:.4f})"
+                )
+                known_rows.append(
+                    {
+                        "gene": gene,
+                        "rank": int(row["rank"]),
+                        "importance": float(row["importance"]),
+                        "direction": int(row["direction"]),
+                        "signed_importance": float(row["signed_importance"]),
+                    }
+                )
+            else:
+                print(f"  {gene:10s}: NOT FOUND")
+                known_rows.append(
+                    {
+                        "gene": gene,
+                        "rank": None,
+                        "importance": None,
+                        "direction": None,
+                        "signed_importance": None,
+                    }
+                )
+
+        known_df = pd.DataFrame(known_rows)
+        known_path = output_dir / "known_cancer_gene_ranks.csv"
+        known_df.to_csv(known_path, index=False)
+        print(f"Saved known cancer gene ranks to: {known_path}")
+
+        # Generate plots
+        print("\nGenerating plots...")
+        plot_top_genes(
+            ig_df,
+            top_n=30,
+            output_path=output_dir / "top_genes.png",
+            title="Top 30 Genes by Integrated Gradients Attribution",
+        )
+        plot_known_cancer_genes(
+            ig_df,
+            output_path=output_dir / "known_cancer_genes.png",
+        )
 
     # Compute Permutation Importance
     if method in ("permutation", "both"):
