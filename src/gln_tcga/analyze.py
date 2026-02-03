@@ -7,13 +7,12 @@ each gene contributes to the model's tumor vs normal predictions.
 
 from pathlib import Path
 
+import gln
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
 from tqdm import tqdm
-
-import gln
 
 # Known breast cancer-related genes for validation
 KNOWN_CANCER_GENES = [

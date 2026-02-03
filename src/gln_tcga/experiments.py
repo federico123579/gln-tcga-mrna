@@ -101,7 +101,9 @@ def snapshot_latest(paths: ExperimentPaths) -> Path:
 
     latest_marker = paths.root / "latest.json"
     latest_marker.write_text(
-        json.dumps({"latest_run": run_id, "latest_dir": str(paths.latest_dir)}, indent=2)
+        json.dumps(
+            {"latest_run": run_id, "latest_dir": str(paths.latest_dir)}, indent=2
+        )
     )
 
     return run_dir
