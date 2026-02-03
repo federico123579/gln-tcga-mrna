@@ -303,6 +303,8 @@ def plot_rank_correlation(
     output_path: str | Path | None = None,
     top_n: int | None = None,
     title: str = "IG vs Permutation Gene Ranks",
+    x_label: str = "Integrated Gradients Rank",
+    y_label: str = "Permutation Importance Rank",
 ) -> plt.Figure:
     """Plot scatter plot comparing gene ranks between two methods.
 
@@ -346,8 +348,8 @@ def plot_rank_correlation(
     max_rank = max(merged["rank_ig"].max(), merged["rank_perm"].max())
     ax.plot([0, max_rank], [0, max_rank], "r--", alpha=0.7, label="Perfect correlation")
 
-    ax.set_xlabel("Integrated Gradients Rank")
-    ax.set_ylabel("Permutation Importance Rank")
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
     ax.set_title(f"{title}\nSpearman r={correlation:.3f}, p={p_value:.2e}", fontsize=12)
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -362,6 +364,68 @@ def plot_rank_correlation(
         output_path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(output_path, dpi=150, bbox_inches="tight")
         print(f"Saved rank correlation plot to: {output_path}")
+
+    return fig
+
+
+def plot_sample_saliency(
+    gene_names: list[str],
+    weights: np.ndarray,
+    output_path: str | Path | None = None,
+    top_n: int = 30,
+    title: str = "Sample Saliency Map",
+) -> plt.Figure:
+    """Plot a saliency map for a single sample.
+
+    Args:
+        gene_names: List of gene names.
+        weights: Per-gene saliency weights for the sample.
+        output_path: Path to save the figure (optional).
+        top_n: Number of genes to display (by absolute weight).
+        title: Plot title.
+
+    Returns:
+        Matplotlib Figure object.
+    """
+    if weights.ndim != 1:
+        raise ValueError("weights must be a 1D array for a single sample")
+
+    df = pd.DataFrame(
+        {
+            "gene": gene_names[: len(weights)],
+            "weight": weights,
+        }
+    )
+    df["abs_weight"] = df["weight"].abs()
+    df = df.sort_values("abs_weight", ascending=False).head(top_n)
+    df = df.sort_values("weight", ascending=True)
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    colors = ["indianred" if w > 0 else "steelblue" for w in df["weight"]]
+
+    ax.barh(df["gene"], df["weight"], color=colors, edgecolor="black")
+
+    ax.set_xlabel("Saliency Weight")
+    ax.set_ylabel("Gene")
+    ax.set_title(title)
+    ax.grid(axis="x", alpha=0.3)
+
+    from matplotlib.patches import Patch
+
+    legend_elements = [
+        Patch(facecolor="indianred", edgecolor="black", label="Positive weight"),
+        Patch(facecolor="steelblue", edgecolor="black", label="Negative weight"),
+    ]
+    ax.legend(handles=legend_elements, loc="lower right")
+
+    plt.tight_layout()
+
+    if output_path:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+        print(f"Saved sample saliency plot to: {output_path}")
 
     return fig
 

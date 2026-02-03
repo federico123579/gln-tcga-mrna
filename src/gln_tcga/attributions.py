@@ -22,6 +22,7 @@ from tqdm import tqdm
 from gln_tcga.plotting import (
     KNOWN_CANCER_GENES,
     plot_known_cancer_genes,
+    plot_sample_saliency,
     plot_top_genes,
 )
 
@@ -60,6 +61,188 @@ class GLNWithTransform(nn.Module):
         """
         x_transformed = self.transformer.transform(x)
         return self.model(x_transformed)
+
+
+def _collapse_active_weights(
+    model: gln.GLN,
+    context: torch.Tensor,
+) -> torch.Tensor:
+    """Collapse active GLN weight matrices into a per-sample effective weight.
+
+    The resulting weight vectors correspond to the data-dependent linear
+    coefficients in logit space for each input sample.
+
+    Args:
+        model: Trained GLN model.
+        context: Transformed input used for gating (batch_size, input_size).
+
+    Returns:
+        Tensor of shape (batch_size, input_size_with_bias) containing effective weights.
+    """
+    weight_mats: list[torch.Tensor] = []
+    for layer in model.layers:
+        weight_mats.append(layer._slice_weights(context))
+    weight_mats.append(model.out_layer._slice_weights(context))
+
+    W_eff = weight_mats[0]
+    for W in weight_mats[1:]:
+        expected_in = W.shape[2]
+        if W_eff.shape[1] < expected_in:
+            pad = expected_in - W_eff.shape[1]
+            zeros = torch.zeros(
+                (W_eff.shape[0], pad, W_eff.shape[2]),
+                device=W_eff.device,
+                dtype=W_eff.dtype,
+            )
+            W_eff = torch.cat([W_eff, zeros], dim=1)
+        elif W_eff.shape[1] > expected_in:
+            raise ValueError(
+                f"Collapsed weights shape mismatch: expected input size {expected_in} but got {W_eff.shape[1]}."
+            )
+
+        W_eff = torch.bmm(W, W_eff)
+
+    return W_eff.squeeze(1)
+
+
+def compute_gln_saliency(
+    model: gln.GLN,
+    transformer: gln.InputTransformer,
+    X: torch.Tensor,
+    gene_names: list[str],
+    *,
+    batch_size: int = 64,
+    drop_bias: bool = True,
+    rank_by: str = "contrib",
+) -> tuple[pd.DataFrame, torch.Tensor, torch.Tensor]:
+    """Compute GLN saliency weights via collapsed active weight matrices.
+
+    This follows the GLN paper's interpretability claim: for a fixed input,
+    the model is linear in logit space, so the collapsed weights provide a
+    direct saliency map without gradient backpropagation.
+
+    Args:
+        model: Trained GLN model.
+        transformer: Fitted InputTransformer.
+        X: Raw input tensor (before transformation).
+        gene_names: List of gene names corresponding to input features.
+        batch_size: Batch size for processing samples.
+        drop_bias: Whether to drop the bias term from analysis.
+        rank_by: Ranking metric: "contrib" (mean |contribution|) or "weight" (mean |weight|).
+
+    Returns:
+        Tuple of:
+            - DataFrame with gene names, importance scores, and direction
+            - Raw saliency weight tensor (n_samples, n_genes)
+            - Raw contribution tensor (n_samples, n_genes)
+    """
+    model.eval()
+
+    device = next(model.parameters()).device
+    n_samples = X.shape[0]
+
+    all_weights: list[torch.Tensor] = []
+    all_contribs: list[torch.Tensor] = []
+
+    batch_iter = range(0, n_samples, batch_size)
+    batch_iter = tqdm(batch_iter, desc="Computing GLN saliency", unit="batch")
+
+    for i in batch_iter:
+        batch_X = X[i : i + batch_size]
+        batch_X = batch_X.cpu()
+
+        # Use transformer on CPU, then move to device for model weights
+        batch_transformed = transformer.transform(batch_X).to(device)
+        context = batch_transformed
+
+        # Effective weights in logit space
+        weights = _collapse_active_weights(model, context)
+
+        # Compute input logit to obtain signed contribution
+        base_out = model.base_layer(batch_transformed)
+        logit_inputs = torch.logit(base_out, eps=model.eps)
+
+        if drop_bias and model.base_layer.raw_b is not None:
+            weights = weights[:, 1:]
+            logit_inputs = logit_inputs[:, 1:]
+
+        contributions = weights * logit_inputs
+
+        all_weights.append(weights.detach().cpu())
+        all_contribs.append(contributions.detach().cpu())
+
+    weights = torch.cat(all_weights, dim=0)
+    contributions = torch.cat(all_contribs, dim=0)
+
+    mean_abs_weights = weights.abs().mean(dim=0).numpy()
+    mean_abs_contribs = contributions.abs().mean(dim=0).numpy()
+    mean_signed_contrib = contributions.mean(dim=0).numpy()
+
+    if rank_by not in {"contrib", "weight"}:
+        raise ValueError(f"rank_by must be 'contrib' or 'weight', got {rank_by!r}.")
+
+    importance = mean_abs_contribs if rank_by == "contrib" else mean_abs_weights
+
+    df = pd.DataFrame(
+        {
+            "gene": gene_names[: len(importance)],
+            "importance": importance,
+            "weight_importance": mean_abs_weights,
+            "contrib_importance": mean_abs_contribs,
+            "direction": np.sign(mean_signed_contrib),
+            "signed_contrib_mean": mean_signed_contrib,
+        }
+    )
+
+    df = df.sort_values("importance", ascending=False).reset_index(drop=True)
+    df["rank"] = df.index + 1
+    df["rank_by"] = rank_by
+
+    return df, weights, contributions
+
+
+def _summarize_contributions_by_class(
+    contributions: torch.Tensor,
+    y: torch.Tensor,
+) -> pd.DataFrame:
+    """Compute class-conditional contribution summaries.
+
+    Args:
+        contributions: Tensor of shape (n_samples, n_genes).
+        y: Tensor of labels (n_samples,).
+
+    Returns:
+        DataFrame with per-gene mean(|contribution|) and mean(contribution)
+        for each class, plus a delta column.
+    """
+    y_np = y.detach().cpu().numpy().astype(int)
+    c = contributions.detach().cpu()
+
+    out = {}
+    for label in (0, 1):
+        mask = torch.from_numpy(y_np == label)
+        if int(mask.sum()) == 0:
+            out[f"mean_abs_contrib_y{label}"] = torch.full((c.shape[1],), float("nan"))
+            out[f"mean_signed_contrib_y{label}"] = torch.full(
+                (c.shape[1],), float("nan")
+            )
+        else:
+            c_lab = c[mask]
+            out[f"mean_abs_contrib_y{label}"] = c_lab.abs().mean(dim=0)
+            out[f"mean_signed_contrib_y{label}"] = c_lab.mean(dim=0)
+
+    df = pd.DataFrame(
+        {
+            "mean_abs_contrib_y0": out["mean_abs_contrib_y0"].numpy(),
+            "mean_abs_contrib_y1": out["mean_abs_contrib_y1"].numpy(),
+            "mean_signed_contrib_y0": out["mean_signed_contrib_y0"].numpy(),
+            "mean_signed_contrib_y1": out["mean_signed_contrib_y1"].numpy(),
+        }
+    )
+    df["delta_abs_contrib_y1_minus_y0"] = (
+        df["mean_abs_contrib_y1"] - df["mean_abs_contrib_y0"]
+    )
+    return df
 
 
 def compute_integrated_gradients(
@@ -284,6 +467,85 @@ def compute_rank_correlation(
     }
 
 
+def compute_rank_correlation_generic(
+    df_a: pd.DataFrame,
+    df_b: pd.DataFrame,
+    *,
+    label_a: str = "a",
+    label_b: str = "b",
+) -> dict[str, float]:
+    """Compute Spearman rank correlation between two ranking DataFrames.
+
+    Args:
+        df_a: DataFrame with 'gene' and 'rank'.
+        df_b: DataFrame with 'gene' and 'rank'.
+        label_a: Label for df_a in the output.
+        label_b: Label for df_b in the output.
+
+    Returns:
+        Dictionary with correlation metrics.
+    """
+    merged = df_a[["gene", "rank"]].merge(
+        df_b[["gene", "rank"]],
+        on="gene",
+        suffixes=(f"_{label_a}", f"_{label_b}"),
+    )
+
+    if merged.empty:
+        return {
+            "spearman_r": float("nan"),
+            "p_value": float("nan"),
+            "n_genes": 0,
+        }
+
+    correlation, p_value = stats.spearmanr(
+        merged[f"rank_{label_a}"],
+        merged[f"rank_{label_b}"],
+    )
+
+    return {
+        "spearman_r": float(correlation),
+        "p_value": float(p_value),
+        "n_genes": len(merged),
+    }
+
+
+def compute_top_rank_overlap(
+    df_a: pd.DataFrame,
+    df_b: pd.DataFrame,
+    *,
+    top_n: int = 100,
+) -> dict[str, float]:
+    """Compute overlap statistics between top-N ranked genes.
+
+    Args:
+        df_a: DataFrame with 'gene' and 'rank'.
+        df_b: DataFrame with 'gene' and 'rank'.
+        top_n: Number of top genes to compare.
+
+    Returns:
+        Dictionary with overlap size and Jaccard index.
+    """
+    top_a = set(df_a.sort_values("rank").head(top_n)["gene"])
+    top_b = set(df_b.sort_values("rank").head(top_n)["gene"])
+
+    if not top_a or not top_b:
+        return {
+            "top_n": top_n,
+            "overlap": 0,
+            "jaccard": float("nan"),
+        }
+
+    overlap = len(top_a.intersection(top_b))
+    union = len(top_a.union(top_b))
+
+    return {
+        "top_n": top_n,
+        "overlap": overlap,
+        "jaccard": overlap / union if union > 0 else float("nan"),
+    }
+
+
 def generate_attributions_report(
     model: gln.GLN,
     transformer: gln.InputTransformer,
@@ -297,6 +559,7 @@ def generate_attributions_report(
     n_steps: int = 50,
     batch_size: int = 64,
     baseline_type: str = "mean",
+    saliency_samples_per_class: int = 3,
 ) -> dict:
     """Generate comprehensive attribution report.
 
@@ -307,11 +570,13 @@ def generate_attributions_report(
         y: Target labels.
         gene_names: List of gene names corresponding to input features.
         output_dir: Directory to save outputs.
-        method: Attribution method(s) to use: "ig", "permutation", or "both".
+        method: Attribution method(s) to use: "ig", "permutation", "saliency",
+            "both" (ig+permutation), or "all" (ig+permutation+saliency).
         compute_correlation: Whether to compute rank correlation (requires both methods).
         n_steps: Number of steps for IG.
         batch_size: Batch size for processing.
         baseline_type: Baseline type for IG.
+        saliency_samples_per_class: Number of per-class sample saliency plots to generate.
 
     Returns:
         Dictionary containing results (DataFrames, correlation stats, etc.)
@@ -324,8 +589,15 @@ def generate_attributions_report(
 
     results = {}
 
+    if method == "both":
+        methods = {"ig", "permutation"}
+    elif method == "all":
+        methods = {"ig", "permutation", "saliency"}
+    else:
+        methods = {method}
+
     # Compute Integrated Gradients
-    if method in ("ig", "both"):
+    if "ig" in methods:
         print("\n" + "-" * 40)
         print("Computing Integrated Gradients (Captum)...")
         print("-" * 40)
@@ -408,7 +680,7 @@ def generate_attributions_report(
         )
 
     # Compute Permutation Importance
-    if method in ("permutation", "both"):
+    if "permutation" in methods:
         print("\n" + "-" * 40)
         print("Computing Permutation Importance (Captum)...")
         print("-" * 40)
@@ -437,7 +709,7 @@ def generate_attributions_report(
             )
 
     # Compute correlation between methods
-    if compute_correlation and method == "both":
+    if compute_correlation and {"ig", "permutation"}.issubset(methods):
         print("\n" + "-" * 40)
         print("Computing Rank Correlation...")
         print("-" * 40)
@@ -455,5 +727,145 @@ def generate_attributions_report(
         print(f"\nSpearman correlation: r={correlation['spearman_r']:.4f}")
         print(f"P-value: {correlation['p_value']:.2e}")
         print(f"N genes: {correlation['n_genes']}")
+
+    # Compute GLN saliency maps
+    if "saliency" in methods:
+        print("\n" + "-" * 40)
+        print("Computing GLN Saliency Maps (collapsed weights)...")
+        print("-" * 40)
+
+        saliency_df, saliency_weights, saliency_contribs = compute_gln_saliency(
+            model,
+            transformer,
+            X,
+            gene_names,
+            batch_size=batch_size,
+            rank_by="contrib",
+        )
+
+        saliency_path = output_dir / "saliency_importance.csv"
+        saliency_df.to_csv(saliency_path, index=False)
+        print(f"Saved saliency importance to: {saliency_path}")
+
+        results["saliency_df"] = saliency_df
+
+        by_class = _summarize_contributions_by_class(saliency_contribs, y)
+        by_class.insert(0, "gene", gene_names[: len(by_class)])
+        by_class_path = output_dir / "saliency_contribs_by_class.csv"
+        by_class.to_csv(by_class_path, index=False)
+        print(f"Saved class-conditional saliency contributions to: {by_class_path}")
+
+        print("\nTop 10 genes by GLN Saliency (ranked by mean |contribution|):")
+        for _, row in saliency_df.head(10).iterrows():
+            direction = "+" if row["direction"] > 0 else "-"
+            print(
+                f"  {row['rank']:3d}. {row['gene']:12s} ({direction}) "
+                f"contrib={row['contrib_importance']:.4f}  weight={row['weight_importance']:.4f}"
+            )
+
+        print("\nGenerating saliency plots...")
+        plot_top_genes(
+            saliency_df,
+            top_n=30,
+            output_path=output_dir / "top_genes_saliency.png",
+            title="Top 30 Genes by GLN Saliency (mean |contribution|)",
+        )
+        plot_known_cancer_genes(
+            saliency_df,
+            output_path=output_dir / "known_cancer_genes_saliency.png",
+            title="Known Breast Cancer Genes - GLN Saliency (mean |contribution|)",
+        )
+
+        # Sample-level saliency maps (one-vs-all in logit space)
+        if saliency_samples_per_class > 0:
+            print("\nGenerating sample-level saliency maps...")
+            device = next(model.parameters()).device
+
+            probs = []
+            with torch.no_grad():
+                for i in range(0, X.shape[0], batch_size):
+                    batch_X = X[i : i + batch_size]
+                    batch_transformed = transformer.transform(batch_X.cpu()).to(device)
+                    batch_probs = model(batch_transformed).squeeze(1).detach().cpu()
+                    probs.append(batch_probs)
+            probs = torch.cat(probs, dim=0)
+
+            y_np = y.detach().cpu().numpy()
+            probs_np = probs.numpy()
+
+            sample_indices: list[int] = []
+            for label in (0, 1):
+                label_mask = y_np == label
+                if not label_mask.any():
+                    continue
+                scores = probs_np if label == 1 else 1.0 - probs_np
+                label_indices = np.where(label_mask)[0]
+                label_scores = scores[label_indices]
+                top_k = min(saliency_samples_per_class, len(label_indices))
+                top_idx = label_indices[np.argsort(label_scores)[-top_k:][::-1]]
+                sample_indices.extend(top_idx.tolist())
+
+            for idx in sample_indices:
+                weights = saliency_contribs[idx].numpy()
+                pred_prob = probs_np[idx]
+                label = int(y_np[idx])
+                title = (
+                    f"Sample Saliency (contribution) (idx={idx}, label={label}, "
+                    f"p(tumor)={pred_prob:.3f})"
+                )
+                plot_sample_saliency(
+                    gene_names,
+                    weights,
+                    output_path=output_dir / f"saliency_sample_{idx}_label_{label}.png",
+                    top_n=30,
+                    title=title,
+                )
+
+                top_df = pd.DataFrame(
+                    {
+                        "gene": gene_names[: len(weights)],
+                        "contribution": weights,
+                        "abs_contribution": np.abs(weights),
+                    }
+                ).sort_values("abs_contribution", ascending=False)
+                top_df.head(200).to_csv(
+                    output_dir / f"saliency_sample_{idx}_top_genes.csv",
+                    index=False,
+                )
+
+        results["saliency_weights"] = saliency_weights
+        results["saliency_contribs"] = saliency_contribs
+
+    # Correlation between IG and saliency
+    if compute_correlation and {"ig", "saliency"}.issubset(methods):
+        print("\n" + "-" * 40)
+        print("Computing IG vs Saliency Rank Correlation...")
+        print("-" * 40)
+
+        corr = compute_rank_correlation_generic(
+            results["ig_df"],
+            results["saliency_df"],
+            label_a="ig",
+            label_b="saliency",
+        )
+        overlap = compute_top_rank_overlap(
+            results["ig_df"],
+            results["saliency_df"],
+            top_n=100,
+        )
+        saliency_corr = {**corr, **overlap}
+
+        corr_path = output_dir / "saliency_rank_correlation.json"
+        with open(corr_path, "w") as f:
+            json.dump(saliency_corr, f, indent=2)
+        print(f"Saved saliency correlation results to: {corr_path}")
+
+        results["saliency_correlation"] = saliency_corr
+
+        print(f"\nSpearman correlation: r={corr['spearman_r']:.4f}")
+        print(f"P-value: {corr['p_value']:.2e}")
+        print(
+            f"Top-100 overlap: {overlap['overlap']} (Jaccard={overlap['jaccard']:.3f})"
+        )
 
     return results

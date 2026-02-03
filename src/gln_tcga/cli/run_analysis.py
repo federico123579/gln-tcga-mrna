@@ -105,9 +105,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--method",
         type=str,
-        choices=["ig", "permutation", "both"],
+        choices=["ig", "permutation", "saliency", "both", "all"],
         default="ig",
-        help="Attribution method: 'ig' (Integrated Gradients), 'permutation', or 'both' (default: ig)",
+        help=(
+            "Attribution method: 'ig' (Integrated Gradients), 'permutation', "
+            "'saliency' (GLN collapsed weights), 'both' (ig+permutation), "
+            "or 'all' (ig+permutation+saliency) (default: ig)"
+        ),
     )
     parser.add_argument(
         "--correlation",
@@ -124,6 +128,12 @@ def parse_args() -> argparse.Namespace:
         "--use-captum",
         action="store_true",
         help="Use Captum-based attribution methods (recommended)",
+    )
+    parser.add_argument(
+        "--saliency-samples",
+        type=int,
+        default=3,
+        help="Number of sample saliency maps to plot per class (default: 3)",
     )
     return parser.parse_args()
 
@@ -188,6 +198,7 @@ def analyze_model(
     method: str = "ig",
     compute_correlation: bool = False,
     use_captum: bool = False,
+    saliency_samples_per_class: int = 3,
 ) -> None:
     """Run analysis on a single model."""
     print(f"\nAnalyzing model (seed={seed})...")
@@ -222,14 +233,29 @@ def analyze_model(
         n_steps=n_steps,
         batch_size=batch_size,
         baseline_type=baseline_type,
+        saliency_samples_per_class=saliency_samples_per_class,
     )
 
     # Generate rank correlation plot if both methods were used
-    if method == "both" and "ig_df" in results and "perm_df" in results:
+    if method in {"both", "all"} and "ig_df" in results and "perm_df" in results:
         plot_rank_correlation(
             results["ig_df"],
             results["perm_df"],
             output_path=seed_output_dir / "rank_correlation.png",
+        )
+
+    if (
+        method in {"saliency", "all"}
+        and "ig_df" in results
+        and "saliency_df" in results
+    ):
+        plot_rank_correlation(
+            results["ig_df"],
+            results["saliency_df"],
+            output_path=seed_output_dir / "rank_correlation_saliency.png",
+            title="IG vs GLN Saliency Gene Ranks",
+            x_label="Integrated Gradients Rank",
+            y_label="GLN Saliency Rank",
         )
 
     # Generate confusion matrix if requested and test data provided
@@ -320,6 +346,7 @@ def analyze_legacy_experiment(
         method=args.method,
         compute_correlation=args.correlation,
         use_captum=args.use_captum,
+        saliency_samples_per_class=args.saliency_samples,
     )
 
 
@@ -419,6 +446,7 @@ def run_analysis(args: argparse.Namespace) -> None:
                     method=args.method,
                     compute_correlation=args.correlation,
                     use_captum=args.use_captum,
+                    saliency_samples_per_class=args.saliency_samples,
                 )
             else:
                 print(f"  Warning: Model file not found: {model_path}")
@@ -452,6 +480,7 @@ def run_analysis(args: argparse.Namespace) -> None:
             method=args.method,
             compute_correlation=args.correlation,
             use_captum=args.use_captum,
+            saliency_samples_per_class=args.saliency_samples,
         )
 
     else:
@@ -482,6 +511,7 @@ def run_analysis(args: argparse.Namespace) -> None:
             method=args.method,
             compute_correlation=args.correlation,
             use_captum=args.use_captum,
+            saliency_samples_per_class=args.saliency_samples,
         )
 
     print()
