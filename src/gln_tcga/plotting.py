@@ -28,42 +28,42 @@ def plot_training_curves(
     Returns:
         Matplotlib Figure object.
     """
-    epoch_losses = history.get("epoch_losses", [])
-    epoch_test_accs = history.get("epoch_test_accs", [])
+    batch_losses = history.get("batch_losses", [])
+    batch_test_accs = history.get("batch_test_accs", [])
 
-    epochs = range(1, len(epoch_losses) + 1)
+    batch = range(1, len(batch_losses) + 1)
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
 
     # Loss curve
-    ax1.plot(epochs, epoch_losses, "b-", linewidth=2, label="Training Loss")
-    ax1.set_xlabel("Epoch")
+    ax1.plot(batch, batch_losses, "b-", linewidth=2, label="Training Loss")
+    ax1.set_xlabel("Batch")
     ax1.set_ylabel("Loss")
     ax1.set_title("Training Loss")
     ax1.grid(True, alpha=0.3)
     ax1.legend()
 
     # Accuracy curve
-    if epoch_test_accs:
+    if batch_test_accs:
         ax2.plot(
-            epochs,
-            [acc * 100 for acc in epoch_test_accs],
+            batch,
+            [acc * 100 for acc in batch_test_accs],
             "g-",
             linewidth=2,
             label="Test Accuracy",
         )
-        ax2.set_xlabel("Epoch")
+        ax2.set_xlabel("Batch")
         ax2.set_ylabel("Accuracy (%)")
         ax2.set_title("Test Accuracy")
         ax2.grid(True, alpha=0.3)
         ax2.legend()
 
         # Add final accuracy annotation
-        final_acc = epoch_test_accs[-1] * 100
+        final_acc = batch_test_accs[-1] * 100
         ax2.axhline(y=final_acc, color="r", linestyle="--", alpha=0.5)
         ax2.annotate(
             f"Final: {final_acc:.2f}%",
-            xy=(len(epochs), final_acc),
+            xy=(len(batch), final_acc),
             xytext=(-50, 10),
             textcoords="offset points",
             fontsize=10,

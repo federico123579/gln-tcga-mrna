@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 
 from gln_tcga.dataset import load_tcga_tumor_vs_normal
 from gln_tcga.experiments import (
@@ -155,7 +154,7 @@ def run_curves(args: argparse.Namespace) -> None:
             "weight_clamp_max": config.get("weight_clamp_max", 10.0),
         }
 
-        print(f"\nTraining config:")
+        print("\nTraining config:")
         print(f"  Layer sizes: {train_config['layer_sizes']}")
         print(f"  Context dimension: {train_config['context_dimension']}")
         print(f"  Learning rate: {train_config['learning_rate']}")
@@ -194,11 +193,13 @@ def run_curves(args: argparse.Namespace) -> None:
     print("\n" + "=" * 60)
     print("Summary")
     print("=" * 60)
-    n_epochs = len(history.get("epoch_losses", []))
-    final_loss = history["epoch_losses"][-1] if history.get("epoch_losses") else None
-    final_acc = history["epoch_test_accs"][-1] if history.get("epoch_test_accs") else None
+    n_batches = len(history.get("batch_losses", []))
+    final_loss = history["batch_losses"][-1] if history.get("batch_losses") else None
+    final_acc = (
+        history["batch_test_accs"][-1] if history.get("batch_test_accs") else None
+    )
 
-    print(f"  Epochs: {n_epochs}")
+    print(f"  Batches: {n_batches}")
     if final_loss is not None:
         print(f"  Final loss: {final_loss:.4f}")
     if final_acc is not None:

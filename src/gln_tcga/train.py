@@ -5,13 +5,12 @@ Training utilities for GLN on TCGA data.
 from pathlib import Path
 from typing import Any
 
+import gln
 import torch
 from torch.optim import Adam
 from torch.optim.lr_scheduler import LinearLR
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
-
-import gln
 
 
 def save_model(
@@ -123,9 +122,10 @@ def train_gln(
     device: torch.device | str = "cpu",
     verbose: bool = False,
     return_history: bool = False,
-) -> tuple[gln.GLN, gln.InputTransformer, float] | tuple[
-    gln.GLN, gln.InputTransformer, float, dict[str, list[float]]
-]:
+) -> (
+    tuple[gln.GLN, gln.InputTransformer, float]
+    | tuple[gln.GLN, gln.InputTransformer, float, dict[str, list[float]]]
+):
     """Train a GLN model on the given data.
 
     Args:
@@ -198,14 +198,14 @@ def train_gln(
         epoch_iter = tqdm(epoch_iter, desc="Training", unit="epoch")
 
     # Track history if requested
-    epoch_losses: list[float] = []
-    epoch_test_accs: list[float] = []
+    batch_losses: list[float] = []
+    batch_test_accs: list[float] = []
 
     for _ in epoch_iter:
         epoch_loss = 0.0
         n_batches = 0
 
-        for X, y in train_dl:
+        for X, y in tqdm(train_dl, desc="Batches", unit="batch", leave=False):
             X = transf(X)
             X, y = X.to(device), y.float().unsqueeze(1).to(device)
 
@@ -224,16 +224,15 @@ def train_gln(
             epoch_loss += loss.item()
             n_batches += 1
 
-        avg_loss = epoch_loss / n_batches if n_batches > 0 else 0.0
-
-        if return_history:
-            epoch_losses.append(avg_loss)
-            # Evaluate on test set at end of each epoch
-            epoch_acc = binary_accuracy(model, transf, test_dl, device=device)
-            epoch_test_accs.append(epoch_acc)
-            model.train()  # Switch back to training mode
+            if return_history:
+                batch_losses.append(loss.item())
+                # Evaluate on test set at end of each batch
+                batch_acc = binary_accuracy(model, transf, test_dl, device=device)
+                batch_test_accs.append(batch_acc)
+                model.train()  # Switch back to training mode
 
         if verbose and n_batches > 0:
+            avg_loss = epoch_loss / n_batches if n_batches > 0 else 0.0
             tqdm.write(f"Epoch loss: {avg_loss:.4f}")
 
     # Evaluate accuracy on test set
@@ -241,8 +240,8 @@ def train_gln(
 
     if return_history:
         history = {
-            "epoch_losses": epoch_losses,
-            "epoch_test_accs": epoch_test_accs,
+            "batch_losses": batch_losses,
+            "batch_test_accs": batch_test_accs,
         }
         return model, transf, test_acc, history
 
