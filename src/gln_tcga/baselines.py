@@ -5,7 +5,7 @@ Provides Logistic Regression and MLP baselines using the same data splits.
 """
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
@@ -17,6 +17,9 @@ from torch.optim.lr_scheduler import LinearLR
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
+if TYPE_CHECKING:
+    from gln_tcga.dataset import Dataset
+
 
 @dataclass
 class BaselineResult:
@@ -27,6 +30,16 @@ class BaselineResult:
     y_true: np.ndarray
     y_pred: np.ndarray
     model: Any = None  # The trained model object
+
+
+@dataclass
+class CVResult:
+    """Result container for cross-validation runs."""
+
+    model_name: str
+    fold_accuracies: list[float]
+    mean_accuracy: float
+    std_accuracy: float
 
 
 class MLP(nn.Module):
@@ -229,4 +242,86 @@ def train_mlp(
         y_true=y_true,
         y_pred=y_pred,
         model=model,
+    )
+
+
+def train_with_cv(
+    dataset: "Dataset",
+    model_type: str,
+    config: dict[str, Any],
+    *,
+    n_folds: int = 5,
+    seed: int = 42,
+    device: torch.device | str = "cpu",
+    verbose: bool = False,
+) -> CVResult:
+    """Train a model with k-fold cross-validation.
+
+    Args:
+        dataset: Dataset object with k_fold_split method.
+        model_type: Type of model to train ("logreg", "mlp", or "gln").
+        config: Training configuration dict (model-specific).
+        n_folds: Number of CV folds (default: 5).
+        seed: Random seed for reproducibility.
+        device: Device for training (PyTorch models).
+        verbose: Whether to print training progress.
+
+    Returns:
+        CVResult with fold accuracies and summary statistics.
+    """
+    fold_accuracies: list[float] = []
+
+    model_names = {
+        "logreg": "Logistic Regression",
+        "mlp": "MLP",
+        "gln": "GLN",
+    }
+    model_name = model_names.get(model_type, model_type)
+
+    print(f"\nTraining {model_name} with {n_folds}-fold CV...")
+
+    for fold_idx, (train_ds, test_ds) in enumerate(
+        dataset.k_fold_split(n_folds=n_folds, shuffle=True, random_seed=seed)
+    ):
+        if verbose:
+            print(f"  Fold {fold_idx + 1}/{n_folds}...")
+
+        if model_type == "logreg":
+            result = train_logistic_regression(train_ds, test_ds, seed=seed)
+            fold_accuracies.append(result.accuracy)
+
+        elif model_type == "mlp":
+            # Set seed for this fold
+            fold_config = {**config, "seed": seed + fold_idx}
+            result = train_mlp(
+                train_ds, test_ds, fold_config, device=device, verbose=False
+            )
+            fold_accuracies.append(result.accuracy)
+
+        elif model_type == "gln":
+            # Import here to avoid circular dependency
+            from gln_tcga.train import train_gln
+
+            fold_config = {**config, "seed": seed + fold_idx}
+            _, _, accuracy = train_gln(
+                train_ds, test_ds, fold_config, device=device, verbose=False
+            )
+            fold_accuracies.append(accuracy)
+
+        else:
+            raise ValueError(f"Unknown model type: {model_type}")
+
+        if verbose:
+            print(f"    Accuracy: {fold_accuracies[-1] * 100:.2f}%")
+
+    mean_acc = float(np.mean(fold_accuracies))
+    std_acc = float(np.std(fold_accuracies))
+
+    print(f"  {model_name}: {mean_acc * 100:.2f}% +/- {std_acc * 100:.2f}%")
+
+    return CVResult(
+        model_name=model_name,
+        fold_accuracies=fold_accuracies,
+        mean_accuracy=mean_acc,
+        std_accuracy=std_acc,
     )

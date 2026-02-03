@@ -5,12 +5,18 @@ Provides functions for visualizing training progress, model comparisons,
 and confusion matrices.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
+
+if TYPE_CHECKING:
+    import pandas as pd
+    from gln_tcga.baselines import CVResult
 
 
 def plot_training_curves(
@@ -197,5 +203,143 @@ def plot_model_comparison(
         output_path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(output_path, dpi=150, bbox_inches="tight")
         print(f"Saved model comparison to: {output_path}")
+
+    return fig
+
+
+def plot_model_comparison_cv(
+    results: dict[str, "CVResult"],
+    output_path: str | Path | None = None,
+    title: str = "Model Comparison (K-Fold CV)",
+) -> plt.Figure:
+    """Plot bar chart comparing model performance with error bars.
+
+    Args:
+        results: Dictionary mapping model names to CVResult objects.
+        output_path: Path to save the figure (optional).
+        title: Plot title.
+
+    Returns:
+        Matplotlib Figure object.
+    """
+    model_names = list(results.keys())
+    mean_accs = [results[name].mean_accuracy * 100 for name in model_names]
+    std_accs = [results[name].std_accuracy * 100 for name in model_names]
+
+    # Sort by mean accuracy
+    sorted_indices = np.argsort(mean_accs)[::-1]
+    model_names = [model_names[i] for i in sorted_indices]
+    mean_accs = [mean_accs[i] for i in sorted_indices]
+    std_accs = [std_accs[i] for i in sorted_indices]
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    # Color bars: highlight the best model
+    colors = ["forestgreen" if i == 0 else "steelblue" for i in range(len(model_names))]
+
+    bars = ax.bar(
+        model_names,
+        mean_accs,
+        yerr=std_accs,
+        color=colors,
+        edgecolor="black",
+        capsize=5,
+        error_kw={"elinewidth": 2, "capthick": 2},
+    )
+
+    ax.set_xlabel("Model")
+    ax.set_ylabel("Accuracy (%)")
+    ax.set_title(title, fontsize=14, fontweight="bold")
+    ax.set_ylim(0, 105)
+    ax.grid(axis="y", alpha=0.3)
+
+    # Add value labels on bars
+    for bar, mean, std in zip(bars, mean_accs, std_accs):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + std + 1,
+            f"{mean:.1f}%",
+            ha="center",
+            va="bottom",
+            fontsize=11,
+            fontweight="bold",
+        )
+
+    plt.tight_layout()
+
+    if output_path:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+        print(f"Saved CV model comparison to: {output_path}")
+
+    return fig
+
+
+def plot_rank_correlation(
+    ig_df: "pd.DataFrame",
+    perm_df: "pd.DataFrame",
+    output_path: str | Path | None = None,
+    top_n: int | None = None,
+    title: str = "IG vs Permutation Gene Ranks",
+) -> plt.Figure:
+    """Plot scatter plot comparing gene ranks between two methods.
+
+    Args:
+        ig_df: DataFrame with 'gene' and 'rank' from Integrated Gradients.
+        perm_df: DataFrame with 'gene' and 'rank' from Permutation Importance.
+        output_path: Path to save the figure (optional).
+        top_n: If set, only plot top N genes by IG rank.
+        title: Plot title.
+
+    Returns:
+        Matplotlib Figure object.
+    """
+    from scipy import stats
+
+    # Merge on gene names
+    merged = ig_df[["gene", "rank"]].merge(
+        perm_df[["gene", "rank"]],
+        on="gene",
+        suffixes=("_ig", "_perm"),
+    )
+
+    if top_n is not None:
+        merged = merged[merged["rank_ig"] <= top_n]
+
+    # Compute correlation
+    correlation, p_value = stats.spearmanr(merged["rank_ig"], merged["rank_perm"])
+
+    fig, ax = plt.subplots(figsize=(10, 10))
+
+    ax.scatter(
+        merged["rank_ig"],
+        merged["rank_perm"],
+        alpha=0.5,
+        s=20,
+        c="steelblue",
+        edgecolor="none",
+    )
+
+    # Add diagonal line (perfect correlation)
+    max_rank = max(merged["rank_ig"].max(), merged["rank_perm"].max())
+    ax.plot([0, max_rank], [0, max_rank], "r--", alpha=0.7, label="Perfect correlation")
+
+    ax.set_xlabel("Integrated Gradients Rank")
+    ax.set_ylabel("Permutation Importance Rank")
+    ax.set_title(f"{title}\nSpearman r={correlation:.3f}, p={p_value:.2e}", fontsize=12)
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    # Make axes equal
+    ax.set_aspect("equal")
+
+    plt.tight_layout()
+
+    if output_path:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+        print(f"Saved rank correlation plot to: {output_path}")
 
     return fig

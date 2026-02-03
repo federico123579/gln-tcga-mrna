@@ -3,8 +3,23 @@ Biomarker analysis for GLN on TCGA data.
 
 Uses Integrated Gradients to compute gene importance - measuring how much
 each gene contributes to the model's tumor vs normal predictions.
+
+.. deprecated::
+    This module contains the legacy implementation of Integrated Gradients.
+    For new code, use :mod:`gln_tcga.attributions` which provides optimized
+    Captum-based implementations of Integrated Gradients, Permutation Importance,
+    and rank correlation analysis.
+
+    Example migration::
+
+        # Old (this module)
+        from gln_tcga.analyze import extract_gene_importance
+
+        # New (recommended)
+        from gln_tcga.attributions import compute_integrated_gradients
 """
 
+import warnings
 from pathlib import Path
 
 import gln
@@ -41,6 +56,10 @@ def integrated_gradients(
 ) -> torch.Tensor:
     """Compute Integrated Gradients attribution for each input feature.
 
+    .. deprecated::
+        Use :func:`gln_tcga.attributions.compute_integrated_gradients` instead,
+        which uses Captum's optimized implementation.
+
     Integrated Gradients (Sundararajan et al., 2017) attributes importance
     by integrating gradients along the path from a baseline to the input.
     This satisfies key axioms: sensitivity and implementation invariance.
@@ -54,6 +73,11 @@ def integrated_gradients(
     Returns:
         Attribution tensor of shape (n_samples, n_features).
     """
+    warnings.warn(
+        "integrated_gradients() is deprecated. Use gln_tcga.attributions.compute_integrated_gradients() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if baseline is None:
         baseline = torch.zeros_like(inputs)
 
@@ -99,6 +123,10 @@ def extract_gene_importance(
 ) -> tuple[pd.DataFrame, torch.Tensor]:
     """Extract gene importance using Integrated Gradients.
 
+    .. deprecated::
+        Use :func:`gln_tcga.attributions.compute_integrated_gradients` instead,
+        which uses Captum's optimized implementation.
+
     Computes how much each gene contributes to predicting "tumor" (class 1)
     across all samples. Genes with high positive attribution push predictions
     toward tumor; genes with high negative attribution push toward normal.
@@ -121,6 +149,11 @@ def extract_gene_importance(
             - DataFrame with gene names, importance scores, and direction
             - Raw attribution tensor (n_samples, n_genes)
     """
+    warnings.warn(
+        "extract_gene_importance() is deprecated. Use gln_tcga.attributions.compute_integrated_gradients() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     model.eval()
 
     # Transform inputs

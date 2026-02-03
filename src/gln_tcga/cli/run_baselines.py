@@ -11,14 +11,18 @@ from __future__ import annotations
 import argparse
 import json
 
-from gln_tcga.baselines import train_logistic_regression, train_mlp
+from gln_tcga.baselines import train_logistic_regression, train_mlp, train_with_cv
 from gln_tcga.dataset import load_tcga_tumor_vs_normal
 from gln_tcga.experiments import (
     load_legacy_config,
     resolve_experiment,
     resolve_run_dir,
 )
-from gln_tcga.plotting import plot_confusion_matrix, plot_model_comparison
+from gln_tcga.plotting import (
+    plot_confusion_matrix,
+    plot_model_comparison,
+    plot_model_comparison_cv,
+)
 from gln_tcga.train import train_gln
 
 
@@ -42,8 +46,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--seed",
         type=int,
-        required=True,
-        help="Random seed for data split and training (required)",
+        default=42,
+        help="Random seed for data split and training (default: 42)",
+    )
+    parser.add_argument(
+        "--cv-folds",
+        type=int,
+        default=None,
+        help="Number of CV folds (default: None, uses single train/test split)",
     )
     parser.add_argument(
         "--compare",
@@ -126,11 +136,114 @@ def run_baselines(args: argparse.Namespace) -> None:
     print(f"Experiment: {args.experiment}")
     print(f"Seed: {seed}")
 
-    # Load dataset and split with the provided seed
+    # Load dataset
     print("\nLoading TCGA mRNA expression data...")
     dataset = load_tcga_tumor_vs_normal()
     print(f"  {dataset}")
 
+    # Check if we're in CV mode
+    if args.cv_folds is not None:
+        run_baselines_cv(args, dataset, config, results_dir, seed)
+    else:
+        run_baselines_single(args, dataset, config, results_dir, seed)
+
+
+def run_baselines_cv(args, dataset, config, results_dir, seed) -> None:
+    """Run baselines with k-fold cross-validation."""
+    n_folds = args.cv_folds
+
+    print(f"\nRunning {n_folds}-fold cross-validation...")
+
+    # Build configs
+    mlp_config = {
+        "layer_sizes": config.get("layer_sizes", [64, 32]),
+        "learning_rate": 0.001,
+        "num_epochs": 100,
+        "batch_size": 32,
+    }
+
+    gln_config = {
+        "layer_sizes": config.get("layer_sizes", [64, 32]),
+        "context_dimension": config.get("context_dimension", 4),
+        "learning_rate": config.get("learning_rate", 0.001),
+        "num_epochs": config.get("num_epochs", 100),
+        "batch_size": config.get("batch_size", 32),
+        "bias": config.get("bias", True),
+        "eps": config.get("eps", 1e-6),
+        "weight_clamp_min": config.get("weight_clamp_min", -10.0),
+        "weight_clamp_max": config.get("weight_clamp_max", 10.0),
+    }
+
+    # Train all models with CV
+    cv_results = {}
+
+    logreg_cv = train_with_cv(
+        dataset, "logreg", {}, n_folds=n_folds, seed=seed, verbose=args.verbose
+    )
+    cv_results["Logistic Regression"] = logreg_cv
+
+    mlp_cv = train_with_cv(
+        dataset,
+        "mlp",
+        mlp_config,
+        n_folds=n_folds,
+        seed=seed,
+        device=args.device,
+        verbose=args.verbose,
+    )
+    cv_results["MLP"] = mlp_cv
+
+    gln_cv = train_with_cv(
+        dataset,
+        "gln",
+        gln_config,
+        n_folds=n_folds,
+        seed=seed,
+        device=args.device,
+        verbose=args.verbose,
+    )
+    cv_results["GLN"] = gln_cv
+
+    # Save CV results to JSON
+    cv_results_json = {
+        name: {
+            "model_name": result.model_name,
+            "fold_accuracies": result.fold_accuracies,
+            "mean_accuracy": result.mean_accuracy,
+            "std_accuracy": result.std_accuracy,
+        }
+        for name, result in cv_results.items()
+    }
+    results_file = results_dir / "cv_results.json"
+    with open(results_file, "w") as f:
+        json.dump(cv_results_json, f, indent=2)
+    print(f"\nSaved CV results to: {results_file}")
+
+    # Generate comparison chart with error bars
+    if args.compare:
+        print("\nGenerating CV model comparison chart...")
+        plot_model_comparison_cv(
+            cv_results,
+            output_path=results_dir / "model_comparison_cv.png",
+            title=f"Model Comparison - {args.experiment} ({n_folds}-fold CV)",
+        )
+
+    # Print summary
+    print("\n" + "=" * 60)
+    print(f"Summary ({n_folds}-fold Cross-Validation)")
+    print("=" * 60)
+    print(f"{'Model':<25} {'Accuracy':>20}")
+    print("-" * 50)
+    for name, res in sorted(cv_results.items(), key=lambda x: -x[1].mean_accuracy):
+        print(
+            f"{name:<25} {res.mean_accuracy * 100:>8.2f}% +/- {res.std_accuracy * 100:.2f}%"
+        )
+    print("=" * 60)
+    print(f"\nResults saved to: {results_dir}")
+
+
+def run_baselines_single(args, dataset, config, results_dir, seed) -> None:
+    """Run baselines with single train/test split (original behavior)."""
     train_ds, test_ds = dataset.train_test_split(
         test_size=config.get("test_size", 0.2),
         random_seed=seed,
@@ -157,10 +270,7 @@ def run_baselines(args: argparse.Namespace) -> None:
 
     mlp_config = {
         "layer_sizes": config.get("layer_sizes", [64, 32]),
-        # "learning_rate": config.get("learning_rate", 0.001),
         "learning_rate": 0.001,
-        # "num_epochs": config.get("num_epochs", 100),
-        # "batch_size": config.get("batch_size", 32),
         "num_epochs": 100,
         "batch_size": 32,
         "seed": seed,

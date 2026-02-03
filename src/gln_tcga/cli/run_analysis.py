@@ -15,6 +15,7 @@ import polars as pl
 import torch
 
 from gln_tcga.analyze import generate_report
+from gln_tcga.attributions import generate_attributions_report
 from gln_tcga.dataset import load_tcga_tumor_vs_normal
 from gln_tcga.experiments import (
     ExperimentInfo,
@@ -24,7 +25,7 @@ from gln_tcga.experiments import (
     resolve_experiment,
     resolve_run_dir,
 )
-from gln_tcga.plotting import plot_confusion_matrix
+from gln_tcga.plotting import plot_confusion_matrix, plot_rank_correlation
 from gln_tcga.results import get_results_df, init_database
 from gln_tcga.train import load_model
 
@@ -102,6 +103,29 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Generate confusion matrix for the model",
     )
+    parser.add_argument(
+        "--method",
+        type=str,
+        choices=["ig", "permutation", "both"],
+        default="ig",
+        help="Attribution method: 'ig' (Integrated Gradients), 'permutation', or 'both' (default: ig)",
+    )
+    parser.add_argument(
+        "--correlation",
+        action="store_true",
+        help="Compute rank correlation between IG and permutation (requires --method both)",
+    )
+    parser.add_argument(
+        "--n-perturb-samples",
+        type=int,
+        default=10,
+        help="Number of permutation samples for permutation importance (default: 10)",
+    )
+    parser.add_argument(
+        "--use-captum",
+        action="store_true",
+        help="Use Captum-based attribution methods (recommended)",
+    )
     return parser.parse_args()
 
 
@@ -162,6 +186,9 @@ def analyze_model(
     baseline_type: str = "mean",
     generate_confusion_matrix: bool = False,
     test_ds: torch.utils.data.TensorDataset | None = None,
+    method: str = "ig",
+    compute_correlation: bool = False,
+    use_captum: bool = False,
 ) -> None:
     """Run analysis on a single model."""
     print(f"\nAnalyzing model (seed={seed})...")
@@ -174,18 +201,50 @@ def analyze_model(
     seed_output_dir = output_dir / f"seed_{seed}"
     seed_output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Generate report (pass y for baseline computation)
-    generate_report(
-        model,
-        transf,
-        dataset.X,
-        dataset.gene_names,
-        seed_output_dir,
-        y=dataset.y,
-        n_steps=n_steps,
-        batch_size=batch_size,
-        baseline_type=baseline_type,
-    )
+    # Choose between Captum-based or legacy analysis
+    if use_captum or method in ("permutation", "both"):
+        # Use Captum-based attribution methods
+        print(f"  Using Captum-based methods (method={method})")
+
+        # If correlation is requested but method is not 'both', upgrade to 'both'
+        if compute_correlation and method != "both":
+            print("  Note: --correlation requires --method both, upgrading...")
+            method = "both"
+
+        results = generate_attributions_report(
+            model,
+            transf,
+            dataset.X,
+            dataset.y,
+            dataset.gene_names,
+            seed_output_dir,
+            method=method,
+            compute_correlation=compute_correlation,
+            n_steps=n_steps,
+            batch_size=batch_size,
+            baseline_type=baseline_type,
+        )
+
+        # Generate rank correlation plot if both methods were used
+        if method == "both" and "ig_df" in results and "perm_df" in results:
+            plot_rank_correlation(
+                results["ig_df"],
+                results["perm_df"],
+                output_path=seed_output_dir / "rank_correlation.png",
+            )
+    else:
+        # Use legacy analysis (IG only via generate_report)
+        generate_report(
+            model,
+            transf,
+            dataset.X,
+            dataset.gene_names,
+            seed_output_dir,
+            y=dataset.y,
+            n_steps=n_steps,
+            batch_size=batch_size,
+            baseline_type=baseline_type,
+        )
 
     # Generate confusion matrix if requested and test data provided
     if generate_confusion_matrix and test_ds is not None:
@@ -272,6 +331,9 @@ def analyze_legacy_experiment(
         baseline_type=args.baseline,
         generate_confusion_matrix=args.confusion_matrix,
         test_ds=test_ds,
+        method=args.method,
+        compute_correlation=args.correlation,
+        use_captum=args.use_captum,
     )
 
 
@@ -368,6 +430,9 @@ def run_analysis(args: argparse.Namespace) -> None:
                     baseline_type=args.baseline,
                     generate_confusion_matrix=args.confusion_matrix,
                     test_ds=get_test_ds_for_seed(seed),
+                    method=args.method,
+                    compute_correlation=args.correlation,
+                    use_captum=args.use_captum,
                 )
             else:
                 print(f"  Warning: Model file not found: {model_path}")
@@ -398,6 +463,9 @@ def run_analysis(args: argparse.Namespace) -> None:
             baseline_type=args.baseline,
             generate_confusion_matrix=args.confusion_matrix,
             test_ds=get_test_ds_for_seed(args.seed),
+            method=args.method,
+            compute_correlation=args.correlation,
+            use_captum=args.use_captum,
         )
 
     else:
@@ -425,6 +493,9 @@ def run_analysis(args: argparse.Namespace) -> None:
             baseline_type=args.baseline,
             generate_confusion_matrix=args.confusion_matrix,
             test_ds=get_test_ds_for_seed(seed),
+            method=args.method,
+            compute_correlation=args.correlation,
+            use_captum=args.use_captum,
         )
 
     print()

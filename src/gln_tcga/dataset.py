@@ -5,6 +5,7 @@ Loads mRNA expression data for Tumor vs Normal classification.
 Downloads data from cBioPortal DataHub with caching.
 """
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,6 +13,7 @@ import numpy as np
 import pandas as pd
 import torch
 from joblib import Memory
+from sklearn.model_selection import StratifiedKFold
 from torch.utils.data import TensorDataset
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -82,6 +84,45 @@ class Dataset:
         test_ds = TensorDataset(self.X[test_indices], self.y[test_indices])
 
         return train_ds, test_ds
+
+    def k_fold_split(
+        self,
+        *,
+        n_folds: int = 5,
+        shuffle: bool = True,
+        random_seed: int = 42,
+    ) -> Iterator[tuple[TensorDataset, TensorDataset]]:
+        """Generate k-fold cross-validation splits.
+
+        Uses StratifiedKFold to maintain class balance in each fold.
+
+        Args:
+            n_folds: Number of folds (default: 5).
+            shuffle: Whether to shuffle before splitting.
+            random_seed: Random seed for reproducibility.
+
+        Yields:
+            Tuples of (train_dataset, test_dataset) for each fold.
+        """
+        skf = StratifiedKFold(
+            n_splits=n_folds,
+            shuffle=shuffle,
+            random_state=random_seed,
+        )
+
+        X_np = self.X.numpy()
+        y_np = self.y.numpy()
+
+        for train_indices, test_indices in skf.split(X_np, y_np):
+            train_ds = TensorDataset(
+                self.X[train_indices],
+                self.y[train_indices],
+            )
+            test_ds = TensorDataset(
+                self.X[test_indices],
+                self.y[test_indices],
+            )
+            yield train_ds, test_ds
 
 
 @memory.cache
