@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 
 from gln_tcga.baselines import train_logistic_regression, train_mlp
 from gln_tcga.dataset import load_tcga_tumor_vs_normal
@@ -158,9 +157,12 @@ def run_baselines(args: argparse.Namespace) -> None:
 
     mlp_config = {
         "layer_sizes": config.get("layer_sizes", [64, 32]),
-        "learning_rate": config.get("learning_rate", 0.001),
-        "num_epochs": config.get("num_epochs", 100),
-        "batch_size": config.get("batch_size", 32),
+        # "learning_rate": config.get("learning_rate", 0.001),
+        "learning_rate": 0.001,
+        # "num_epochs": config.get("num_epochs", 100),
+        # "batch_size": config.get("batch_size", 32),
+        "num_epochs": 100,
+        "batch_size": 32,
         "seed": seed,
     }
     print(f"  Config: {mlp_config}")
@@ -195,9 +197,11 @@ def run_baselines(args: argparse.Namespace) -> None:
         "weight_clamp_min": config.get("weight_clamp_min", -10.0),
         "weight_clamp_max": config.get("weight_clamp_max", 10.0),
     }
-    print(f"  Config: layer_sizes={gln_config['layer_sizes']}, "
-          f"context_dim={gln_config['context_dimension']}, "
-          f"epochs={gln_config['num_epochs']}")
+    print(
+        f"  Config: layer_sizes={gln_config['layer_sizes']}, "
+        f"context_dim={gln_config['context_dimension']}, "
+        f"epochs={gln_config['num_epochs']}"
+    )
 
     model, transf, gln_accuracy = train_gln(
         train_ds,
