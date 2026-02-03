@@ -12,6 +12,7 @@ dependencies = [
     "pandas>=2.2",
     "polars>=0.20",
     "requests>=2.31",
+    "scikit-learn>=1.4",
     "torch>=2.2",
     "tqdm>=4.66",
 ]
@@ -20,6 +21,8 @@ dependencies = [
 gln-train = "gln_tcga.cli.train_models:main"
 gln-analyze = "gln_tcga.cli.run_analysis:main"
 gln-experiment = "gln_tcga.cli.run_experiment:main"
+gln-baselines = "gln_tcga.cli.run_baselines:main"
+gln-curves = "gln_tcga.cli.plot_curves:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

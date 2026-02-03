@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+
 import polars as pl
+import torch
 
 from gln_tcga.analyze import generate_report
 from gln_tcga.dataset import load_tcga_tumor_vs_normal
@@ -22,6 +24,7 @@ from gln_tcga.experiments import (
     resolve_experiment,
     resolve_run_dir,
 )
+from gln_tcga.plotting import plot_confusion_matrix
 from gln_tcga.results import get_results_df, init_database
 from gln_tcga.train import load_model
 
@@ -78,7 +81,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=64,
+        default=10,
         help="Batch size for analysis (default: 64)",
     )
     parser.add_argument(
@@ -93,6 +96,11 @@ def parse_args() -> argparse.Namespace:
         choices=["mean", "normal", "zero"],
         default="mean",
         help="Baseline type for Integrated Gradients: 'mean' (recommended), 'normal', or 'zero' (default: mean)",
+    )
+    parser.add_argument(
+        "--confusion-matrix",
+        action="store_true",
+        help="Generate confusion matrix for the model",
     )
     return parser.parse_args()
 
@@ -152,6 +160,8 @@ def analyze_model(
     batch_size: int = 64,
     device: str = "cpu",
     baseline_type: str = "mean",
+    generate_confusion_matrix: bool = False,
+    test_ds: torch.utils.data.TensorDataset | None = None,
 ) -> None:
     """Run analysis on a single model."""
     print(f"\nAnalyzing model (seed={seed})...")
@@ -176,6 +186,28 @@ def analyze_model(
         batch_size=batch_size,
         baseline_type=baseline_type,
     )
+
+    # Generate confusion matrix if requested and test data provided
+    if generate_confusion_matrix and test_ds is not None:
+        print("  Generating confusion matrix...")
+        from torch.utils.data import DataLoader
+
+        test_dl = DataLoader(test_ds, batch_size=len(test_ds), shuffle=False)
+        y_true = test_ds.tensors[1].numpy()
+
+        model.eval()
+        with torch.no_grad():
+            for X, _ in test_dl:
+                X = transf.transform(X).to(device)
+                out = model(X)
+                y_pred = (out.squeeze() >= 0.5).long().cpu().numpy()
+
+        plot_confusion_matrix(
+            y_true,
+            y_pred,
+            output_path=seed_output_dir / "confusion_matrix.png",
+            title=f"GLN Confusion Matrix (seed={seed})",
+        )
 
 
 def resolve_model_path(model_value: str, run_dir: Path, models_dir: Path) -> Path:
@@ -217,6 +249,15 @@ def analyze_legacy_experiment(
 
     dataset = load_tcga_tumor_vs_normal()
 
+    # Get test dataset if confusion matrix is requested
+    test_ds = None
+    if args.confusion_matrix:
+        seed_val = int(seed) if isinstance(seed, int) else 0
+        _, test_ds = dataset.train_test_split(
+            test_size=config.get("test_size", 0.2),
+            random_seed=seed_val,
+        )
+
     results_dir = experiment_root / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -229,6 +270,8 @@ def analyze_legacy_experiment(
         batch_size=args.batch_size,
         device=args.device,
         baseline_type=args.baseline,
+        generate_confusion_matrix=args.confusion_matrix,
+        test_ds=test_ds,
     )
 
 
@@ -286,6 +329,26 @@ def run_analysis(args: argparse.Namespace) -> None:
     # Ensure output directory exists
     results_dir.mkdir(exist_ok=True)
 
+    # Load metadata to get test_size for data split
+    metadata_path = run_dir / "metadata.json"
+    test_size = 0.2  # default
+    if metadata_path.exists():
+        import json
+
+        metadata = json.loads(metadata_path.read_text())
+        config = metadata.get("config", {})
+        test_size = config.get("test_size", 0.2)
+
+    # Helper to get test_ds for a specific seed (needed for confusion matrix)
+    def get_test_ds_for_seed(seed: int):
+        if not args.confusion_matrix:
+            return None
+        _, test_ds = dataset.train_test_split(
+            test_size=test_size,
+            random_seed=seed,
+        )
+        return test_ds
+
     if args.all:
         # Analyze all models
         print(f"\nAnalyzing all {len(results_df)} models...")
@@ -293,6 +356,7 @@ def run_analysis(args: argparse.Namespace) -> None:
             seed = row["seed"]
             model_path = resolve_model_path(row["model_path"], run_dir, models_dir)
             if model_path.exists():
+                # CRITICAL: use the model's seed for data split to match training
                 analyze_model(
                     seed,
                     model_path,
@@ -302,6 +366,8 @@ def run_analysis(args: argparse.Namespace) -> None:
                     batch_size=args.batch_size,
                     device=args.device,
                     baseline_type=args.baseline,
+                    generate_confusion_matrix=args.confusion_matrix,
+                    test_ds=get_test_ds_for_seed(seed),
                 )
             else:
                 print(f"  Warning: Model file not found: {model_path}")
@@ -320,6 +386,7 @@ def run_analysis(args: argparse.Namespace) -> None:
             print(f"Error: Model file not found: {model_path}")
             return
 
+        # CRITICAL: use the specified seed for data split to match training
         analyze_model(
             args.seed,
             model_path,
@@ -329,6 +396,8 @@ def run_analysis(args: argparse.Namespace) -> None:
             batch_size=args.batch_size,
             device=args.device,
             baseline_type=args.baseline,
+            generate_confusion_matrix=args.confusion_matrix,
+            test_ds=get_test_ds_for_seed(args.seed),
         )
 
     else:
@@ -344,6 +413,7 @@ def run_analysis(args: argparse.Namespace) -> None:
             print(f"Error: Model file not found: {model_path}")
             return
 
+        # CRITICAL: use the best model's seed for data split to match training
         analyze_model(
             seed,
             model_path,
@@ -353,6 +423,8 @@ def run_analysis(args: argparse.Namespace) -> None:
             batch_size=args.batch_size,
             device=args.device,
             baseline_type=args.baseline,
+            generate_confusion_matrix=args.confusion_matrix,
+            test_ds=get_test_ds_for_seed(seed),
         )
 
     print()

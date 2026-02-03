@@ -122,7 +122,10 @@ def train_gln(
     *,
     device: torch.device | str = "cpu",
     verbose: bool = False,
-) -> tuple[gln.GLN, gln.InputTransformer, float]:
+    return_history: bool = False,
+) -> tuple[gln.GLN, gln.InputTransformer, float] | tuple[
+    gln.GLN, gln.InputTransformer, float, dict[str, list[float]]
+]:
     """Train a GLN model on the given data.
 
     Args:
@@ -137,9 +140,13 @@ def train_gln(
             - seed: Random seed for reproducibility
         device: Device to train on ("cpu", "cuda", "mps").
         verbose: Whether to print training progress.
+        return_history: Whether to return training history (epoch losses/accuracies).
 
     Returns:
         Tuple of (trained_model, input_transformer, test_accuracy).
+        If return_history=True, returns (trained_model, input_transformer,
+        test_accuracy, history) where history contains 'epoch_losses' and
+        'epoch_test_accs' lists.
     """
     seed = config.get("seed", 42)
     generator = torch.Generator().manual_seed(seed)
@@ -190,13 +197,17 @@ def train_gln(
     if verbose:
         epoch_iter = tqdm(epoch_iter, desc="Training", unit="epoch")
 
+    # Track history if requested
+    epoch_losses: list[float] = []
+    epoch_test_accs: list[float] = []
+
     for _ in epoch_iter:
         epoch_loss = 0.0
         n_batches = 0
 
         for X, y in train_dl:
             X = transf(X)
-            X, y = X.to(device), y.unsqueeze(1).to(device)
+            X, y = X.to(device), y.float().unsqueeze(1).to(device)
 
             optim.zero_grad()
             out = model(X)
@@ -213,11 +224,26 @@ def train_gln(
             epoch_loss += loss.item()
             n_batches += 1
 
+        avg_loss = epoch_loss / n_batches if n_batches > 0 else 0.0
+
+        if return_history:
+            epoch_losses.append(avg_loss)
+            # Evaluate on test set at end of each epoch
+            epoch_acc = binary_accuracy(model, transf, test_dl, device=device)
+            epoch_test_accs.append(epoch_acc)
+            model.train()  # Switch back to training mode
+
         if verbose and n_batches > 0:
-            avg_loss = epoch_loss / n_batches
             tqdm.write(f"Epoch loss: {avg_loss:.4f}")
 
     # Evaluate accuracy on test set
     test_acc = binary_accuracy(model, transf, test_dl, device=device)
+
+    if return_history:
+        history = {
+            "epoch_losses": epoch_losses,
+            "epoch_test_accs": epoch_test_accs,
+        }
+        return model, transf, test_acc, history
 
     return model, transf, test_acc
