@@ -66,6 +66,11 @@ def parse_args() -> argparse.Namespace:
         help="Generate confusion matrices for all models",
     )
     parser.add_argument(
+        "--online-ogd",
+        action="store_true",
+        help="Use online OGD during retraining",
+    )
+    parser.add_argument(
         "--device",
         type=str,
         default="cpu",
@@ -201,6 +206,7 @@ def run_baselines_cv(args, dataset, config, results_dir, seed) -> None:
         seed=seed,
         device=args.device,
         verbose=args.verbose,
+        use_online_ogd=args.online_ogd,
     )
     cv_results["GLN"] = gln_cv
 
@@ -319,6 +325,7 @@ def run_baselines_single(args, dataset, config, results_dir, seed) -> None:
         gln_config,
         device=args.device,
         verbose=args.verbose,
+        use_online_ogd=args.online_ogd,
     )
 
     # Get GLN predictions

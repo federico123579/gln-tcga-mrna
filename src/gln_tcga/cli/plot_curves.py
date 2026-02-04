@@ -51,6 +51,11 @@ def parse_args() -> argparse.Namespace:
         help="Retrain model to capture training history",
     )
     parser.add_argument(
+        "--online-ogd",
+        action="store_true",
+        help="Use online OGD during retraining",
+    )
+    parser.add_argument(
         "--device",
         type=str,
         default="cpu",
@@ -170,6 +175,7 @@ def run_curves(args: argparse.Namespace) -> None:
             device=args.device,
             verbose=args.verbose,
             return_history=True,
+            use_online_ogd=args.online_ogd,
         )
 
         print(f"\nFinal test accuracy: {test_acc * 100:.2f}%")

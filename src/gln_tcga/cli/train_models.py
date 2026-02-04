@@ -12,7 +12,6 @@ import argparse
 import json
 import shutil
 import time
-from pathlib import Path
 
 import torch
 from tqdm import tqdm
@@ -39,6 +38,10 @@ DEFAULT_CONFIG = {
     "eps": 1e-6,
     "weight_clamp_min": -10.0,
     "weight_clamp_max": 10.0,
+    # OGD projection bounds (used when --online-ogd is set)
+    "w_min": 0.0,
+    "w_max": 1.0,
+    "lr_schedule": "sqrt",
     # Reproducibility
     "seeds": [42, 43, 44],
 }
@@ -98,6 +101,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Device: 'cpu', 'cuda', 'mps', or 'auto' (default: auto)",
     )
     parser.add_argument(
+        "--online-ogd",
+        action="store_true",
+        help="Use paper-faithful local Online Gradient Descent instead of Adam backprop",
+    )
+    parser.add_argument(
+        "--lr-schedule",
+        type=str,
+        default=DEFAULT_CONFIG["lr_schedule"],
+        choices=["sqrt", "linear", "constant"],
+        help="Learning rate schedule for OGD: 'sqrt' (1/√t), 'linear' (1/t), 'constant' (default: sqrt)",
+    )
+    parser.add_argument(
         "--no-snapshot",
         action="store_true",
         help="Disable snapshotting the latest run into a timestamped folder",
@@ -141,8 +156,12 @@ def run_training(args: argparse.Namespace) -> None:
         "eps": DEFAULT_CONFIG["eps"],
         "weight_clamp_min": DEFAULT_CONFIG["weight_clamp_min"],
         "weight_clamp_max": DEFAULT_CONFIG["weight_clamp_max"],
+        "w_min": DEFAULT_CONFIG["w_min"],
+        "w_max": DEFAULT_CONFIG["w_max"],
+        "lr_schedule": args.lr_schedule,
         "seeds": args.seeds,
     }
+    use_online_ogd = args.online_ogd
 
     device = get_device(args.device)
 
@@ -167,11 +186,13 @@ def run_training(args: argparse.Namespace) -> None:
     print()
 
     # Run experiments with different seeds
-    print(f"Training GLN (device={device})...")
+    print(f"Training GLN (device={device}, online_ogd={use_online_ogd})...")
     print(f"  Layer sizes: {config['layer_sizes']}")
     print(f"  Context dimension: {config['context_dimension']}")
     print(f"  Epochs: {config['num_epochs']}, Batch size: {config['batch_size']}")
     print(f"  Learning rate: {config['learning_rate']}")
+    if use_online_ogd:
+        print(f"  LR schedule: {config['lr_schedule']}, w_bounds: [{config['w_min']}, {config['w_max']}]")
     print()
 
     accuracies: list[float] = []
@@ -195,6 +216,7 @@ def run_training(args: argparse.Namespace) -> None:
             run_config,
             device=device,
             verbose=False,
+            use_online_ogd=use_online_ogd,
         )
         training_time = time.time() - start_time
 

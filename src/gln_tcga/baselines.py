@@ -254,6 +254,7 @@ def train_with_cv(
     seed: int = 42,
     device: torch.device | str = "cpu",
     verbose: bool = False,
+    use_online_ogd: bool = False,
 ) -> CVResult:
     """Train a model with k-fold cross-validation.
 
@@ -265,6 +266,7 @@ def train_with_cv(
         seed: Random seed for reproducibility.
         device: Device for training (PyTorch models).
         verbose: Whether to print training progress.
+        use_online_ogd: Whether to use online OGD during GLN training.
 
     Returns:
         CVResult with fold accuracies and summary statistics.
@@ -304,7 +306,12 @@ def train_with_cv(
 
             fold_config = {**config, "seed": seed + fold_idx}
             _, _, accuracy = train_gln(
-                train_ds, test_ds, fold_config, device=device, verbose=False
+                train_ds,
+                test_ds,
+                fold_config,
+                device=device,
+                verbose=False,
+                use_online_ogd=use_online_ogd,
             )
             fold_accuracies.append(accuracy)
 

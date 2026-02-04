@@ -41,6 +41,8 @@ def save_model(
         "input_size": model.input_size,
         "layer_sizes": model.layer_sizes,
         "context_dimension": model.context_dimension,
+        "w_min": model.w_min,
+        "w_max": model.w_max,
     }
     torch.save(checkpoint, path)
 
@@ -60,13 +62,15 @@ def load_model(
     """
     checkpoint = torch.load(path, map_location=device, weights_only=False)
 
-    # Reconstruct model
+    # Reconstruct model (handle both old and new checkpoint formats)
     model = gln.GLN(
         input_size=checkpoint["input_size"],
         layer_sizes=checkpoint["layer_sizes"],
         context_dimension=checkpoint["context_dimension"],
         bias=checkpoint["config"].get("bias", True),
         eps=checkpoint["config"].get("eps", 1e-6),
+        w_min=checkpoint.get("w_min", 0.0),
+        w_max=checkpoint.get("w_max", 1.0),
     )
     model.load_state_dict(checkpoint["model_state_dict"])
     model.to(device)
@@ -122,6 +126,7 @@ def train_gln(
     device: torch.device | str = "cpu",
     verbose: bool = False,
     return_history: bool = False,
+    use_online_ogd: bool = False,
 ) -> (
     tuple[gln.GLN, gln.InputTransformer, float]
     | tuple[gln.GLN, gln.InputTransformer, float, dict[str, list[float]]]
@@ -134,13 +139,19 @@ def train_gln(
         config: Training configuration dict with keys:
             - layer_sizes: List of hidden layer sizes
             - context_dimension: Context dimension for gating
-            - learning_rate: Learning rate for Adam optimizer
+            - learning_rate: Learning rate (for Adam or initial OGD lr)
             - num_epochs: Number of training epochs
             - batch_size: Batch size for training
             - seed: Random seed for reproducibility
+            - w_min: (optional) Min weight for OGD projection, default 0.0
+            - w_max: (optional) Max weight for OGD projection, default 1.0
+            - lr_schedule: (optional) "sqrt", "linear", or "constant" for OGD
         device: Device to train on ("cpu", "cuda", "mps").
         verbose: Whether to print training progress.
         return_history: Whether to return training history (epoch losses/accuracies).
+        use_online_ogd: If True, use paper-faithful local Online Gradient Descent
+            instead of standard end-to-end backprop with Adam. This implements
+            the GLN learning rule from the original paper.
 
     Returns:
         Tuple of (trained_model, input_transformer, test_accuracy).
@@ -167,6 +178,10 @@ def train_gln(
     # Get input size from data
     input_size = train_ds.tensors[0].shape[1]
 
+    # Weight bounds for OGD projection
+    w_min = config.get("w_min", 0.0)
+    w_max = config.get("w_max", 1.0)
+
     # Create GLN model
     model = gln.GLN(
         input_size=input_size,
@@ -174,22 +189,34 @@ def train_gln(
         context_dimension=config["context_dimension"],
         bias=config.get("bias", True),
         eps=config.get("eps", 1e-6),
+        w_min=w_min,
+        w_max=w_max,
         generator=generator,
     ).to(device)
 
-    # Optimizer and scheduler
-    optim = Adam(model.parameters(), lr=config["learning_rate"])
-    total_steps = len(train_dl) * config["num_epochs"]
-    scheduler = LinearLR(
-        optim,
-        start_factor=1.0,
-        end_factor=0.1,
-        total_iters=total_steps,
-    )
+    # Training mode selection
+    if use_online_ogd:
+        # Paper-faithful local Online Gradient Descent
+        lr_schedule = config.get("lr_schedule", "sqrt")
+        lr_scheduler = gln.LearningRateScheduler(
+            initial_lr=config["learning_rate"],
+            schedule=lr_schedule,
+            min_lr=1e-6,
+        )
+    else:
+        # Standard end-to-end backprop with Adam
+        optim = Adam(model.parameters(), lr=config["learning_rate"])
+        total_steps = len(train_dl) * config["num_epochs"]
+        scheduler = LinearLR(
+            optim,
+            start_factor=1.0,
+            end_factor=0.1,
+            total_iters=total_steps,
+        )
 
-    # Weight clamping bounds
-    weight_clamp_min = config.get("weight_clamp_min", -10.0)
-    weight_clamp_max = config.get("weight_clamp_max", 10.0)
+        # Weight clamping bounds (for backprop mode)
+        weight_clamp_min = config.get("weight_clamp_min", -10.0)
+        weight_clamp_max = config.get("weight_clamp_max", 10.0)
 
     # Training loop
     model.train()
@@ -207,19 +234,31 @@ def train_gln(
 
         for X, y in tqdm(train_dl, desc="Batches", unit="batch", leave=False):
             X = transf(X)
-            X, y = X.to(device), y.float().unsqueeze(1).to(device)
+            X, y = X.to(device), y.float().to(device)
 
-            optim.zero_grad()
-            out = model(X)
-            loss = model.loss(out, y)
-            loss.backward()
-            optim.step()
-            scheduler.step()
+            if use_online_ogd:
+                # Paper-faithful local OGD update
+                # Process samples one at a time for true online learning
+                # (or use batch with vectorized update)
+                lr = lr_scheduler.step()
+                out = model.online_update(X, y, lr=lr, vectorized=True)
+                # Compute loss for logging (no gradient needed)
+                with torch.no_grad():
+                    loss = model.loss(out, y.unsqueeze(1))
+            else:
+                # Standard end-to-end backprop
+                y = y.unsqueeze(1)
+                optim.zero_grad()
+                out = model(X)
+                loss = model.loss(out, y)
+                loss.backward()
+                optim.step()
+                scheduler.step()
 
-            # Weight clamping
-            with torch.no_grad():
-                for param in model.parameters():
-                    param.clamp_(weight_clamp_min, weight_clamp_max)
+                # Weight clamping
+                with torch.no_grad():
+                    for param in model.parameters():
+                        param.clamp_(weight_clamp_min, weight_clamp_max)
 
             epoch_loss += loss.item()
             n_batches += 1
