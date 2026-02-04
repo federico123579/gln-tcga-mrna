@@ -27,12 +27,28 @@
 
 = Introduction
 
-// FIXME
+Gated Linear Networks (GLNs) are a class of neural networks introduced by @gln that replace global backpropagation with local convex learning and a contextual gating mechanism. Despite their theoretical appeal (online learning, modularity, and a natural notion of “active-path” explanations), available implementations are often hard to reproduce due to outdated dependencies and vague experimental settings.
 
-== Project Objective // FIXME
-== Motivation // FIXME
-== Problem Statement // FIXME
-== Report Structure // FIXME
+This work provides:
+
++ A clean, modular GLN implementation in PyTorch #footnote([de-facto standard for the deep learning research community, see @pytorch]) designed for extension and controlled experimentation, following best practices for reproducible research and GPU acceleration.
++ An empirical study on a real high-dimensional biomedical task (TCGA-BRCA mRNA-based tumor vs. normal classification #short-cite(<tcga-brca>)).
+
+Beyond predictive performance, an analysis of interpretability is performed using Saliency attribution and Integrated Gradients #short-cite(<integrated-gradients>) methods, revealing important constraints when applying explainability techniques to GLNs.
+
+== Project Objective
+Implement the GLN architecture from first principles in PyTorch (including geometric mixing and contextual gating), with emphasis on a reproducible and extensible codebase, and evaluate it on a real-world high-dimensional genomic classification task (TCGA-BRCA tumor vs. normal), focusing on both predictive performance and interpretability.
+
+== Motivation
+Two needs motivate this project. First, GLNs are typically presented as a practically attractive alternative to deep networks because each unit optimizes a local convex objective, enabling efficient online learning without end-to-end gradient credit assignment. Second, genomic classification operates in an extreme $p gt.double n$ regime (tens of thousands of genes and relatively few samples), where reproducibility and interpretability are as important as raw accuracy. A modular, well-specified implementation is required to assess whether GLNs' theoretical properties translate into reliable gains on real biomedical data.
+
+== Problem Statement
+Given TCGA Breast Invasive Carcinoma (BRCA) transcriptomic profiles with ~20k mRNA expression features per sample, learn a binary classifier that distinguishes tumor from normal tissue. The core challenges are (i) very high input dimensionality, (ii) class imbalance, and (iii) the requirement to understand which biological features drive decisions rather than only achieving high test accuracy.
+
+== Report Structure
+The report is split into two parts:
+- *Part I* introduces the theory behind GLNs (local learning, geometric mixing, and half-space contextual gating) and describes the PyTorch implementation choices that enable reproducible experiments and architectural variations.
+- *Part II* presents the TCGA-BRCA experimental setup and results, then focuses on interpretability: attribution with Integrated Gradients and Saliency attribution methods, followed by a discussion of the observed accuracy-interpretability tension in high-dimensional genomics.
 
 #pagebreak()
 

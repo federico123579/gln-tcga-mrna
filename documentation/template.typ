@@ -220,6 +220,18 @@
   )
 }
 
+#let part-section(title, focus) = {
+  let counter = counter("sections")
+  counter.step()
+  align(center, text(
+    1.2em,
+    weight: "bold",
+  )[Part #context counter.display("I"): #title])
+  align(center)[*Focus: #focus*]
+}
+
+#let short-cite(key) = cite(key, form: "normal")
+
 // ============================================================================
 // TEMPLATE FUNCTIONS
 // ============================================================================
@@ -338,26 +350,26 @@
   #index()
   #pagebreak()
 
+  #let sections = counter("sections")
+
   #set par(justify: true)
-  #set text(size: 10pt)
   #set heading(numbering: "1.")
+  #set enum(numbering: "i.")
   #set page(
-    margin: (x: 2cm, y: 2cm),
     footer: context [
       #set align(center)
       #set text(9pt)
       #counter(page).display("1")
     ],
   )
+  #set cite(form: "prose")
 
   // Show rules for styling
   #show link: underline
-  #show ref: underline
+  #show cite: set text(fill: maroon)
 
   #doc
 
-  // Bibliography (uncomment when bibliography.yml is ready)
   #pagebreak()
-  = References <references>
-  #bibliography("bibliography.yml", title: none)
+  #bibliography("bibliography.yml")
 ]
