@@ -27,14 +27,14 @@
 
 = Introduction
 
-Gated Linear Networks (GLNs) are a class of neural networks introduced by @gln that replace global backpropagation with local convex learning and a contextual gating mechanism. Despite their theoretical appeal (online learning, modularity, and a natural notion of “active-path” explanations), available implementations are often hard to reproduce due to outdated dependencies and vague experimental settings.
+Gated Linear Networks (GLNs) are a class of neural networks introduced by #long-cite(<gln>) that replace global backpropagation with local convex learning and a contextual gating mechanism. Despite their theoretical appeal (online learning, modularity, and a natural notion of “active-path” explanations), available implementations are often hard to reproduce due to outdated dependencies and vague experimental settings.
 
 This work provides:
 
-+ A clean, modular GLN implementation in PyTorch #footnote([de-facto standard for the deep learning research community, see @pytorch]) designed for extension and controlled experimentation, following best practices for reproducible research and GPU acceleration.
-+ An empirical study on a real high-dimensional biomedical task (TCGA-BRCA mRNA-based tumor vs. normal classification #short-cite(<tcga-brca>)).
++ A clean, modular GLN implementation in PyTorch #footnote([de-facto standard for the deep learning research community, see #long-cite(<pytorch>)]) designed for extension and controlled experimentation, following best practices for reproducible research and GPU acceleration.
++ An empirical study on a real high-dimensional biomedical task (TCGA-BRCA mRNA-based tumor vs. normal classification @tcga-brca)).
 
-Beyond predictive performance, an analysis of interpretability is performed using Saliency attribution and Integrated Gradients #short-cite(<integrated-gradients>) methods, revealing important constraints when applying explainability techniques to GLNs.
+Beyond predictive performance, an analysis of interpretability is performed using Saliency attribution and Integrated Gradients @integrated-gradients methods, revealing important constraints when applying explainability techniques to GLNs.
 
 == Project Objective
 Implement the GLN architecture from first principles in PyTorch (including geometric mixing and contextual gating), with emphasis on a reproducible and extensible codebase, and evaluate it on a real-world high-dimensional genomic classification task (TCGA-BRCA tumor vs. normal), focusing on both predictive performance and interpretability.
@@ -63,86 +63,95 @@ The report is split into two parts:
 
 = Theoretical Foundation
 
-Gated Linear Networks (GLNs) combine two ideas from @gln: (i) *geometric mixing*, which turns a linear combination of logits into a probability while preserving convexity of the log-loss in the weights, and (ii) *contextual gating*, which selects among multiple weight vectors based on side information (typically a random half-space partition of an input-dependent context). Stacking such units yields a deep architecture that can be trained online with local updates, without end-to-end backpropagation.
+Gated Linear Networks (GLNs) are fundamentally based on two different learning mechanics @gln:
 
-== From Backpropagation to Local Learning
-In a standard neural network, parameters are optimized by minimizing a global objective and propagating gradients through the entire computation graph. This couples layers tightly: an upstream change modifies downstream representations, so the “credit assignment” problem is inherently global and the loss landscape is generally non-convex.
++ *geometric mixing*: a logit-space mixture that maps probability features back to a probability while keeping the Bernoulli log-loss convex in the mixing weights
++ *contextual gating*: a discrete selection mechanism that chooses among multiple expert weight vectors based on side information.
 
-GLNs instead attach a *local* loss to each unit (log-loss for Bernoulli outputs). A unit treats its inputs (probabilities produced by the previous layer) as fixed features and updates only its own mixing weights using Online Gradient Descent (OGD). Under the geometric-mixing parameterization, the per-unit loss is convex in the unit’s weights, giving a stronger optimization story than typical deep networks: each unit tracks the best predictor available within its gated linear class, even in a streaming setting @gln.
+Stacking such gated geometric-mixing units results in a deep architecture that admits an online training rule with purely local updates and strong theoretical guarantees.
 
-Practically, this means training can be performed in a single pass over the data, with updates applied immediately after each example (or small batch), making GLNs naturally suited to online/continual learning scenarios.
+== Probability Features and Stable Logits <transform-input>
+A key architectural constraint in @gln is that each layer consumes _probability features_ rather than unconstrained real-valued activations. In the paper's formulation, these initial probabilities are provided by a _base model_ (or _base transformation_) that maps the raw input into $(0,1)$; the GLN then composes gated geometric-mixing units on top of this probabilistic interface.
 
-== The Geometric Mixing Formula
-Each GLN neuron operates on *probability inputs* $bold(p) in (0,1)^d$. Let
-$ "logit"(p) = ln(p / (1 - p)) $
-and $sigma(z) = 1 / (1 + exp(-z))$.
+In this work, following the practical choice suggested by DeepMind's reference implementation @deepmind-repo, the base transform is a feature-wise sigmoid. To make this mapping invariant to affine shifts in location and scale, the raw vector $bold(x) in RR^p$ is first standardized using training-set statistics:
+$ bold(x)' = (bold(x) - bold(mu)) / bold(s), $
+where $bold(mu)$ and $bold(s)$ are per-feature mean and standard deviation estimated on the training set. The base probabilities are then obtained as
+$ bold(p) = "clip"( sigma(bold(x)'), epsilon, 1 - epsilon ) in (0,1)^p, $
+with $sigma$ the logistic sigmoid and $epsilon$ a small constant to prevent numerical issues at the boundaries. This stage provides the bounded probabilistic features required by the GLN units and reduces immediate sigmoid saturation due to arbitrary input scales.
 
-Given weights $bold(w) in RR^d$, the neuron outputs
-$ hat(p) = sigma(bold(w) dot "logit"(bold(p))). $
+The network then operates on $bold(p)$ through the stable logit transform
+$ "logit"_epsilon (p) = "logit"( "clip"(p, epsilon, 1 - epsilon) ) = ln(p / (1 - p)). $
 
-Equivalently, this is a normalized product-of-experts form:
-$ hat(p) = (product_i p_i^(w_i)) / (product_i p_i^(w_i) + product_i (1 - p_i)^(w_i)). $
+== Geometric Mixing
+Let $bold(p) in (0,1)^d$ be the vector of probability features for a neuron (after optional bias concatenation), and let $bold(w) in RR^d$ be its mixing weights. The geometric-mixing prediction is
+$ hat(p) = sigma(bold(w)^top "logit"_epsilon (bold(p))). $
 
-Two consequences from @gln are central for learning:
-- With log-loss $ell(y, hat(p)) = -y ln hat(p) - (1-y) ln(1-hat(p))$, the loss is *convex* in $bold(w)$.
-- The gradient has a simple form proportional to the logit inputs, enabling stable OGD updates.
+The same prediction can be written more intuitively as a product-of-experts by moving to odds space. Define the odds of each input feature as $o_i$ and the combined odds as $o$:
+$
+  o_i := p_i / (1 - p_i), #h(2cm) o := product_i o_i^(w_i)
+$
 
-For numerical stability, implementations clamp inputs to $[epsilon, 1-epsilon]$ before applying `logit`, and apply a projection/clamp step $bold(w) <- "clip"(bold(w), -B, B)$ after each update (the bounded-domain assumption used by OGD analyses in @gln).
+Converting back to a probability gives
+$
+  hat(p) = o / (1 + o)
+  = (product_i p_i^(w_i)) / (product_i p_i^(w_i) + product_i (1 - p_i)^(w_i)).
+$
 
-== Contextual Gating (Half-Space Partitioning)
-Geometric mixing alone is still a generalized linear model over logit-features. GLNs gain capacity by allowing *multiple* weight vectors per neuron and selecting among them via a context function.
+Given Bernoulli target $y in {0,1}$, the local log-loss is
+$ ell(y, hat(p)) = -y ln hat(p) - (1-y) ln(1-hat(p)). $
+Under geometric mixing, $ell$ is convex in $bold(w)$ @gln. Moreover, the gradient has a particularly simple closed form:
+$ nabla_w ell = (hat(p) - y) "logit"_epsilon (bold(p)). $
+This is the algebraic reason GLNs admit stable, layer-local Online Gradient Descent (OGD) updates without backpropagation.
 
-A common context mechanism in @gln is a set of $K$ random half-spaces over side information $bold(z)$ (often $bold(z)$ is the original input or a fixed transform of it). For $k in {1..K}$:
-$ h_k(bold(z)) = [ bold(v)_k dot bold(z) + b_k > 0 ], $
-with $(bold(v)_k, b_k)$ sampled once at initialization and kept fixed.
+== Contextual Gating via Random Half-Spaces
+Geometric mixing alone is a generalized linear model in logit space. Capacity is increased by equipping each neuron with a *table* of expert weights indexed by a discrete context.
 
-The resulting binary vector $bold(h) in {0,1}^K$ indexes one of $2^K$ regions; each region has its own weight vector $bold(w)_{bold(h)}$. Intuitively:
-- within a region, the neuron behaves like a convex, well-optimized linear predictor (in logit space);
-- globally, the neuron is piecewise-defined across regions, yielding a non-linear model without learning the gating boundaries.
+In the implemented GLN, each neuron $j$ samples $K$ random half-spaces over a context vector $bold(z) in RR^q$:
+$ h_{j,k}(bold(z)) = [ bold(v)_{j,k}^top bold(z) >= b_{j,k} ], quad k in {0,1,...,K-1}, $
+where $bold(v)_{j,k}$ is sampled from a standard normal distribution and normalized to unit length, and $b_{j,k}$ is sampled from a standard normal distribution. The resulting bit-vector $bold(h)_j in {0,1}^K$ is packed into an integer index
+$ c_j(bold(z)) = sum_{k=0}^{K-1} 2^k h_{j,k}(bold(z)) in {0,...,2^K-1}. $
 
-This “fixed random partition + learned experts” design is a key reason GLNs can be trained with purely local convex updates while still achieving non-linear behavior @gln.
+Each neuron therefore stores a weight tensor
+$ W_j in RR^(2^K times d), quad (W_j)_{c,:} = bold(w)_{j,c}, $
+and uses $bold(w)_{j,c_j(bold(z))}$ as its active expert on input $bold(z)$. In this work, the context is taken to be the input itself (transformed as seen in @transform-input), and it is treated as fixed side information during local updates.
 
-== Why GLNs Are Special
-GLNs are interesting less for raw expressivity than for the combination of *capacity* and *training dynamics*:
-- *Online learning by design*: local OGD updates allow effective single-pass training and fast adaptation.
-- *Reduced interference*: because each context indexes its own weights, updates for one region minimally affect others (helpful under non-stationarity).
-- *A structured explanation primitive*: for a given input, the active context picks a specific set of weights, so the prediction can be “collapsed” to an input-dependent linear form (useful for auditing, though not guaranteed to map cleanly to semantically meaningful features in high-dimensional tabular settings).
-- *Theoretical tractability*: convex per-unit losses support convergence/regret guarantees under standard OGD assumptions @gln.
-
-== The GLN Architecture
-The GLN used in this work follows the standard blueprint from @gln:
-- *Input-to-probability mapping*: continuous features are transformed to $(0,1)$ (e.g., via normalization + sigmoid + clipping) so they can be interpreted as Bernoulli probabilities for geometric mixing.
-- *Stacked gated layers*: each layer contains multiple neurons; each neuron receives probability inputs from the previous layer and selects a context using side information (often the original input vector, so all layers gate on a common reference).
-- *Bias feature*: a constant probability input is appended to each layer to allow non-zero intercepts under mixing.
-- *Output Bernoulli predictor*: the final layer produces $hat(p)(y=1|x)$.
-
-Training proceeds online: for each example, compute layer outputs, then update each layer’s weights using its local log-loss (optionally aggregating per-neuron losses within a layer). Importantly, the update rule treats lower-layer outputs as fixed inputs for the layer being updated, matching the “no cross-layer credit assignment” principle of GLNs @gln.
+== Bias as a Probability Feature
+To provide an intercept term while preserving the probability-feature interface, the implementation uses a learnable _bias probability_ $b in (0,1)$ appended as an additional input coordinate (and similarly appended between hidden layers). The bias is parameterized by an unconstrained scalar $r in RR$ via $b = sigma(r)$ and then concatenated to the feature vector, yielding an always-valid Bernoulli feature.
 
 = PyTorch Implementation
 
-== Module Structure
-The codebase mirrors the conceptual decomposition of @gln:
-- *Core math utilities*: stable `logit`, `sigmoid`, clamping, and geometric-mix forward pass.
-- *Layer modules*: a base input-to-probability layer, gated geometric-mixing layers, and an output Bernoulli layer.
-- *Model wrapper*: a `GLN` module that composes layers, controls context source, and exposes `forward` and training helpers.
+The implementation, provided alongside this document, closely follows the decomposition suggested by #long-cite(<gln>), while exposing two complementary training modes (@training-regimes).
 
-This separation makes it easy to swap architectural choices (number of layers/neurons, context dimensionality, context source) while keeping the learning rule unchanged.
+== Core Modules // FIXME
+- *Math utilities*: `logit` with explicit $epsilon$-stabilization, `sigmoid`/`logistic`, and the vectorized geometric-mixing primitive $sigma(sum_i w_i "logit"(p_i))$.
+- *Layers*: a `BaseLayer` that optionally appends the bias probability and clips to $(epsilon, 1-epsilon)$, followed by one or more `GatedLinearLayer`s, and a final `BernoulliLayer` with a single output neuron.
+- *Context buffers*: per-layer hyperplane parameters $(V, b)$ are stored as non-trainable buffers (fixed after initialization), ensuring that checkpointing fully captures the gating partition.
 
-== Key Implementation Details
-A few implementation details are critical to match the intended GLN behavior:
-- *Tensor shapes*: for `out_dim` neurons, `in_dim` inputs, and `K` context bits, store weights as
-  `W: [out_dim, 2^K, in_dim]`
-  so each neuron has an independent expert table over contexts.
-- *Context indexing*: compute the $K$ half-space bits per sample, pack them into an integer index in `[0, 2^K)`, and gather the corresponding slice of `W` efficiently (vectorized over batch and neurons).
-- *Numerical stability*: clamp probabilities to `[eps, 1-eps]` before `logit`; optionally clamp logits to a finite range; project weights to `[-B, B]` after each optimizer step.
-- *Local-loss training*: compute a Bernoulli log-loss per layer (or per neuron) using that layer’s prediction and the target; update only that layer’s parameters. In PyTorch, this is typically implemented by stopping gradient flow *between* layers for the purpose of weight updates (e.g., using detached inputs to each layer during that layer’s loss computation), reflecting the GLN local-learning assumption in @gln.
+== Tensorization and Indexing
+For a layer with `size` neurons, input dimension $d$, and context dimension $K$, the layer stores
+$ W in RR^("size" times 2^K times d) $
+Given a batch of contexts, the half-space tests produce a boolean tensor of shape $("size", "batch", K)$, which is packed into indices $c in {0,...,2^K-1}$ per neuron and sample. The corresponding expert vectors $W[j, c] in RR^d$ are gathered efficiently to compute the forward pass in a fully vectorized manner.
 
-== Design Choices for Flexibility
-The implementation is designed to support controlled experiments:
-- *Context source as a parameter*: gate on raw input, normalized input, or previous-layer activations to test how partitions interact with domain geometry.
-- *Deterministic random hyperplanes*: initialize context hyperplanes with a seeded generator and store them as non-trainable buffers so checkpoints fully capture the partitioning.
-- *Device-agnostic execution*: keep buffers and parameters on the same device, allowing CPU/GPU/MPS runs without code changes.
-- *Experiment hooks*: expose per-layer losses/accuracies and context-usage statistics (e.g., how many contexts are visited), which are often informative when diagnosing training/interpretability behavior.
+== Two Training Regimes <training-regimes>
+The codebase supports two distinct ways of fitting the same architecture.
+
+=== (A) Paper-faithful Online OGD (Local Learning)
+In the online regime, each layer performs local OGD updates on its active expert weights, treating the inputs from the previous layer as fixed probability features. For a neuron with active expert weights $bold(w)_t$ at time $t$, local feature vector $bold(p)_t$ and learning rate $eta_t$, the update implemented is
+$ bold(w)_{t+1} = Pi_W ( bold(w)_t - eta_t (hat(p)_t - y_t) "logit"_epsilon (bold(p)_t) ), $
+where $Pi_W$ is the Euclidean projection onto a compact convex set $W$.
+
+In this implementation, $W$ is chosen as a coordinate-wise hypercube $[w_min, w_max]^d$ (defaulting to $[0,1]^d$), so projection is an inexpensive clamp operation. The learning rate schedule is configurable, and includes the paper-standard decay
+$ eta_t = eta_0 / sqrt(t), $
+which yields an $O(sqrt(T))$ regret bound for OGD under standard assumptions (convex loss, bounded gradients, bounded domain). In practice, the implementation also provides a vectorized variant of the update: within a batch, gradients corresponding to samples that activate the same (neuron, context) expert are aggregated before applying the step, trading exact per-sample updates for speed.
+
+=== (B) Batch Adam (End-to-end Optimization for Ablations)
+For empirical comparisons and controlled experiments, the same GLN can be trained in a *batch* regime using standard end-to-end optimization. In this mode, we minimize the empirical risk
+$ min_theta (1/n) sum_{i=1}^n ell(y_i, f_theta(bold(p)_i)), $
+where $theta$ collects all learnable parameters (in particular, the expert weight tables and bias parameters) and $f_theta$ is the compositional forward map of the stacked gated layers.
+
+Optimization is performed with Adam in our experiments, but the implementation is agnostic to the specific choice of optimizer: any PyTorch-compatible optimizer (e.g., SGD, AdamW, RMSprop, Adagrad) can be plugged in to update the expert weight tables and bias parameters. Since contextual gating is discrete, the resulting objective is piecewise smooth: for a fixed set of active experts, gradients flow to the selected weights, while the gating boundaries remain fixed (hyperplanes are not trained). To stabilize training across optimizers, weights are optionally clamped to a finite range after each optimizer step.
+
+The two regimes should be interpreted as complementary: online OGD matches the theoretical GLN learning rule and supports regret-style guarantees, whereas batch Adam intentionally relaxes the local-learning principle to enable ablations and stress-tests in the high-dimensional settings.
 
 #pagebreak()
 

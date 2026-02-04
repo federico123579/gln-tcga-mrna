@@ -52,6 +52,11 @@ tcga-brca:
     volume: 490
   doi: 10.1038/nature11412
 
+deepmind-repo:
+  type: repository
+  title: DeepMind's GitHub Repository
+  url: https://github.com/google-deepmind/deepmind-research/tree/master/gated_linear_networks
+
 cbioportal:
   type: article
   title: "The cBio Cancer Genomics Portal: An Open Platform for Exploring Multidimensional Cancer Genomics Data"

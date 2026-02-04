@@ -230,7 +230,7 @@
   align(center)[*Focus: #focus*]
 }
 
-#let short-cite(key) = cite(key, form: "normal")
+#let long-cite(key) = cite(key, form: "prose")
 
 // ============================================================================
 // TEMPLATE FUNCTIONS
@@ -362,7 +362,6 @@
       #counter(page).display("1")
     ],
   )
-  #set cite(form: "prose")
 
   // Show rules for styling
   #show link: underline
