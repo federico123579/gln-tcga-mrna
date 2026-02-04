@@ -38,6 +38,7 @@
         "TCGA",
         "TMEFF",
         "TMEM",
+        "transcriptomic",
         "VENTXP",
         "Wmat"
     ]
