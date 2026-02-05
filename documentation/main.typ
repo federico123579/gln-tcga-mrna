@@ -122,11 +122,6 @@ To provide an intercept term while preserving the probability-feature interface,
 
 The implementation, provided alongside this document, closely follows the decomposition suggested by #long-cite(<gln>), while exposing two complementary training modes (@training-regimes).
 
-== Core Modules // FIXME
-- *Math utilities*: `logit` with explicit $epsilon$-stabilization, `sigmoid`/`logistic`, and the vectorized geometric-mixing primitive $sigma(sum_i w_i "logit"(p_i))$.
-- *Layers*: a `BaseLayer` that optionally appends the bias probability and clips to $(epsilon, 1-epsilon)$, followed by one or more `GatedLinearLayer`s, and a final `BernoulliLayer` with a single output neuron.
-- *Context buffers*: per-layer hyperplane parameters $(V, b)$ are stored as non-trainable buffers (fixed after initialization), ensuring that checkpointing fully captures the gating partition.
-
 == Tensorization and Indexing
 For a layer with `size` neurons, input dimension $d$, and context dimension $K$, the layer stores
 $ W in RR^("size" times 2^K times d) $
