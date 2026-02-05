@@ -80,11 +80,11 @@ $ bold(p) = "clip"( sigma(bold(x)'), epsilon, 1 - epsilon ) in (0,1)^p, $
 with $sigma$ the logistic sigmoid and $epsilon$ a small constant to prevent numerical issues at the boundaries. This stage provides the bounded probabilistic features required by the GLN units and reduces immediate sigmoid saturation due to arbitrary input scales.
 
 The network then operates on $bold(p)$ through the stable logit transform
-$ "logit"_epsilon (p) = "logit"( "clip"(p, epsilon, 1 - epsilon) ) = ln(p / (1 - p)). $
+$ sigma^(-1)_epsilon (p) = "logit"( "clip"(p, epsilon, 1 - epsilon) ) = ln(p / (1 - p)). $
 
 == Geometric Mixing
 Let $bold(p) in (0,1)^d$ be the vector of probability features for a neuron (after optional bias concatenation), and let $bold(w) in RR^d$ be its mixing weights. The geometric-mixing prediction is
-$ hat(p) = sigma(bold(w)^top "logit"_epsilon (bold(p))). $
+$ hat(p) = sigma(bold(w)^top sigma^(-1)_epsilon (bold(p))). $
 
 The same prediction can be written more intuitively as a product-of-experts by moving to odds space. Define the odds of each input feature as $o_i$ and the combined odds as $o$:
 $
@@ -100,7 +100,7 @@ $
 Given Bernoulli target $y in {0,1}$, the local log-loss is
 $ ell(y, hat(p)) = -y ln hat(p) - (1-y) ln(1-hat(p)). $
 Under geometric mixing, $ell$ is convex in $bold(w)$ @gln. Moreover, the gradient has a particularly simple closed form:
-$ nabla_w ell = (hat(p) - y) "logit"_epsilon (bold(p)). $
+$ nabla_w ell = (hat(p) - y) sigma^(-1)_epsilon (bold(p)). $
 This is the algebraic reason GLNs admit stable, layer-local Online Gradient Descent (OGD) updates without backpropagation.
 
 == Contextual Gating via Random Half-Spaces
@@ -137,7 +137,7 @@ The codebase supports two distinct ways of fitting the same architecture.
 
 === (A) Paper-faithful Online OGD (Local Learning)
 In the online regime, each layer performs local OGD updates on its active expert weights, treating the inputs from the previous layer as fixed probability features. For a neuron with active expert weights $bold(w)_t$ at time $t$, local feature vector $bold(p)_t$ and learning rate $eta_t$, the update implemented is
-$ bold(w)_{t+1} = Pi_W ( bold(w)_t - eta_t (hat(p)_t - y_t) "logit"_epsilon (bold(p)_t) ), $
+$ bold(w)_{t+1} = Pi_W ( bold(w)_t - eta_t (hat(p)_t - y_t) sigma^(-1)_epsilon (bold(p)_t) ), $
 where $Pi_W$ is the Euclidean projection onto a compact convex set $W$.
 
 In this implementation, $W$ is chosen as a coordinate-wise hypercube $[w_min, w_max]^d$ (defaulting to $[0,1]^d$), so projection is an inexpensive clamp operation. The learning rate schedule is configurable, and includes the paper-standard decay
