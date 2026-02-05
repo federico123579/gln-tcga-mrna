@@ -153,6 +153,9 @@ Optimization is performed with Adam in our experiments, but the implementation i
 
 The two regimes should be interpreted as complementary: online OGD matches the theoretical GLN learning rule and supports regret-style guarantees, whereas batch Adam intentionally relaxes the local-learning principle to enable ablations and stress-tests in the high-dimensional settings.
 
+== Accelerator Compatibility and Vectorized Execution
+All computations are expressed as standard PyTorch tensor operations and run unchanged on any backend supported by PyTorch's `device` interface (CPU, CUDA, MPS). Inputs, weight tables, gating hyperplanes, and intermediate tensors are created on the selected device, and both the forward pass (gating, expert selection, geometric mixing) and the optional batched OGD update are implemented without Python-level loops, relying instead on batched indexing/gather and fused elementwise ops.
+
 #pagebreak()
 
 // ============================================================================
