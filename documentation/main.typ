@@ -153,8 +153,7 @@ The two regimes should be interpreted as complementary: online OGD matches the t
 All computations are expressed as standard PyTorch tensor operations and run unchanged on any backend supported by PyTorch's `device` interface (CPU, CUDA, MPS). Inputs, weight tables, gating hyperplanes, and intermediate tensors are created on the selected device, and both the forward pass (gating, expert selection, geometric mixing) and the optional batched OGD update are implemented without Python-level loops, relying instead on batched indexing/gather and fused elementwise ops.
 
 == Reproducibility Benchmark (MNIST)
-
-As an external reproducibility benchmark, we report results on MNIST @mnist. This dataset is small enough to enable quick end-to-end runs, yet structured enough to reveal whether the implementation supports (i) multiclass training, (ii) non-trivial generalization after short training, and (iii) interpretable saliency patterns consistent with digit strokes.
+Results on the MNIST dataset @mnist are provided as an external reproducibility benchmark. The dataset is small enough to enable quick end-to-end runs and structured to evaluate (i) multiclass training, (ii) non-trivial generalization after short training, and (iii) interpretable saliency patterns consistent with digit strokes.
 
 The benchmark suite lives in `gated-linear-networks/benchmarks`. The most reliable reproduction instructions (installation, CLI options, and output paths) are given in the benchmark README in that directory.
 
