@@ -114,23 +114,6 @@
   )
 }
 
-/// Grouped experiment parameters (dataset, model, training)
-#let experiment-params(
-  dataset: (),
-  model: (),
-  training: (),
-) = {
-  set table(inset: 5pt)
-  show table.cell.where(y: 0): strong
-  align(center, grid(
-    columns: (auto, auto, auto),
-    gutter: 10pt,
-    if dataset.len() > 0 { param-table("Dataset", ..dataset) },
-    if model.len() > 0 { param-table("Model", ..model) },
-    if training.len() > 0 { param-table("Training", ..training) },
-  ))
-}
-
 /// Note/callout box
 #let note-box(content, title: "Note", color: blue) = {
   block(
@@ -231,6 +214,70 @@
 }
 
 #let long-cite(key) = cite(key, form: "prose")
+
+
+#let format(number, precision) = {
+  assert(precision > 0)
+  let s = str(calc.round(number, digits: precision))
+  let after_dot = s.find(regex("\..*"))
+  if after_dot == none {
+    s = s + "."
+    after_dot = "."
+  }
+  for i in range(precision - after_dot.len() + 1) {
+    s = s + "0"
+  }
+  s
+}
+
+#let accuracy_table(accuracies) = [
+  #show table.cell.where(x: 0): strong
+  #show table.cell.where(y: 0): strong
+  #set table(
+    stroke: (x, y) => {
+      if y > 0 {
+        (x: 1pt + black)
+      } else if y == 0 {
+        (1pt + black)
+      }
+    },
+    align: center,
+  )
+
+  #table(
+    columns: 2,
+    table.header([Digit], [Accuracy]),
+    ..for (digit, acc) in accuracies {
+      let acc = format(acc, 4)
+      ([#digit], [$acc$])
+    },
+    table.hline(),
+  )
+]
+
+#let parameter_table(parameters) = [
+  #show table.cell.where(x: 0): strong
+  #show table.cell.where(y: 0): strong
+  #show table.cell: c => {
+    if c.y == 0 or c.x == 0 {
+      align(center, c)
+    } else {
+      align(left, c)
+    }
+  }
+  #block(height: auto, columns(1, gutter: 2mm, table(
+    stroke: none,
+    rows: auto,
+    columns: (auto, auto),
+    align: (right + horizon, left + horizon),
+    inset: (x: 2mm, y: 3.5pt),
+    table.header([*Parameter*], [*Value*]),
+    table.hline(),
+    ..for (param, value) in parameters {
+      ([#param], [#value])
+    },
+  )))
+]
 
 // ============================================================================
 // TEMPLATE FUNCTIONS

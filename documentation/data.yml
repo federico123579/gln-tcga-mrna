@@ -1,0 +1,20 @@
+accuracies:
+  p1:
+    0: 0.9631
+    1: 0.9712
+    2: 0.8967
+    3: 0.8993
+    4: 0.9263
+  p2:
+    5: 0.8547
+    6: 0.9586
+    7: 0.9383
+    8: 0.9250
+    9: 0.8604
+parameters:
+  epochs: 1
+  batch_size: 5
+  lr: 0.01
+  layers: 50 25
+  context_dim: 6
+  lr_schedule: sqrt

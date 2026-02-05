@@ -4,6 +4,7 @@
 // ============================================================================
 
 #import "template.typ": *
+#let data = yaml("data.yml")
 
 #show: doc => template(
   authors: (
@@ -150,6 +151,44 @@ The two regimes should be interpreted as complementary: online OGD matches the t
 
 == Accelerator Compatibility and Vectorized Execution
 All computations are expressed as standard PyTorch tensor operations and run unchanged on any backend supported by PyTorch's `device` interface (CPU, CUDA, MPS). Inputs, weight tables, gating hyperplanes, and intermediate tensors are created on the selected device, and both the forward pass (gating, expert selection, geometric mixing) and the optional batched OGD update are implemented without Python-level loops, relying instead on batched indexing/gather and fused elementwise ops.
+
+== Reproducibility Benchmark (MNIST)
+
+As an external reproducibility benchmark, we report results on MNIST @mnist. This dataset is small enough to enable quick end-to-end runs, yet structured enough to reveal whether the implementation supports (i) multiclass training, (ii) non-trivial generalization after short training, and (iii) interpretable saliency patterns consistent with digit strokes.
+
+The benchmark suite lives in `gated-linear-networks/benchmarks`. The most reliable reproduction instructions (installation, CLI options, and output paths) are given in the benchmark README in that directory.
+
+The benchmark trains a `MulticlassGLN` via a one-vs-all decomposition. Two training modes are available: paper-faithful online OGD (default) and batch backpropagation (enabled with `--backprop`). The run summarized here uses online OGD and then generates a 2$times$5 saliency grid over the ten digit classes (see @mnist_saliency). The hyperparameter configuration and the per-class test accuracies are summarized in the tables below.
+
+#let parameter_figure = figure(
+  parameter_table((data.parameters)),
+  caption: [MNIST benchmark hyperparameters used in the reproduction run.],
+)
+
+#let accuracy_figure = figure(
+  grid(
+    columns: (auto, auto),
+    gutter: 5pt,
+    accuracy_table(data.accuracies.p1), accuracy_table(data.accuracies.p2),
+  ),
+  caption: [MNIST per-class test accuracies for the reproduction run (split for readability).],
+)
+
+#align(center, block(
+  width: 90%,
+  grid(
+    columns: (auto, auto),
+    gutter: 1cm,
+    accuracy_figure, parameter_figure,
+  ),
+))
+
+On this configuration, the overall test accuracy was #strong([0.9203]). Per-class accuracies are reported in the table above; the most challenging classes in this run were 5 and 9, while 1 achieved the highest accuracy.
+
+#figure(
+  image("assets/mnist_saliency_maps.png", width: 100%),
+  caption: [MNIST signed saliency maps per digit class computed from the GLN's collapsed active weights. The patterns are qualitatively consistent with reference visualizations (salient strokes align with digit morphology), but are not expected to match exactly across runs due to random half-space partitions, seed sensitivity, and small differences in preprocessing and learning-rate schedules.],
+) <mnist_saliency>
 
 #pagebreak()
 
