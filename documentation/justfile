@@ -1,2 +1,5 @@
 default:
     typst compile main.typ
+
+dev:
+    typst watch main.typ
