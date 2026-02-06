@@ -202,10 +202,33 @@ On this configuration, the overall test accuracy was #strong([0.9203]). Per-clas
 
 = The TCGA-BRCA Dataset
 
-// FIXME
+This work uses TCGA Breast Invasive Carcinoma (BRCA) data and frames it as a binary classification problem: given a vector of mRNA expression measurements, predict whether a tissue sample is *tumor* or *normal*. At a high level, each sample is represented by a high-dimensional feature vector (one feature per gene), which matches the setting described in the TCGA BRCA reference study @tcga-brca. Concretely, the files used in this project are obtained through the cBioPortal ecosystem @cbioportal.
 
-== Data Source and Acquisition // FIXME
-== Dataset Characteristics // FIXME
+== Data Source and Acquisition
+Data are retrieved from the public cBioPortal DataHub repository @cbioportal-datahub, specifically from the curated study `brca_tcga_pan_can_atlas_2018`. To make acquisition reproducible and lightweight, the loader downloads only the two required expression matrices directly via HTTP from GitHub (rather than cloning the full repository):
+
+- tumor samples: `data_mrna_seq_v2_rsem.txt`
+- normal samples: `normals/data_mrna_seq_v2_rsem_normal_samples.txt`
+
+Each file is a tab-separated _expression matrix_, whose rows index genes and whose columns index samples. Each entry $e_(g,s)$ represents the (RSEM-based) expression estimate of gene $g$ in sample $s$ @rsem. Downloaded artifacts are cached locally to make reruns deterministic and to avoid repeated network transfers.
+
+== Dataset Construction and Cleaning
+The loader parses the two tab-separated tables, removes the metadata column `Entrez_Gene_Id` when present, and transposes the matrices so that each row is a sample and each column is a gene.
+
+Tumor and normal files do not always contain exactly the same gene list. Therefore, the final feature set keeps only genes that appear in both sources. If we denote by $G_"tumor"$ and $G_"normal"$ the gene sets in the two tables, we use $G^* = G_"tumor" ∩ G_"normal"$. Genes with missing names are discarded and duplicate gene columns are removed.
+
+The final design matrix is $X in RR^(n times p), quad p = |G^*|$
+and labels are defined as
+$ y_i = 0 ("normal"), quad y_i = 1 ("tumor"), $
+resulting in $bold(y) in {0,1}^n$.
+
+== Splitting Protocols (Hold-out and Stratified $k$-fold)
+The dataset container exposes two splitting schemes used across experiments:
+
+- a reproducible hold-out split with configurable test fraction (default: 80/20) and seed-controlled shuffling;
+- stratified $k$-fold cross-validation (default: $k=5$), where stratification approximately preserves the class proportions in each fold.
+
+These protocols are essential in the high-dimensional regime (many more features than samples): performance estimates can vary substantially with the particular split, and stratification reduces the risk of misleading results when classes are imbalanced.
 
 = Experimental Results
 

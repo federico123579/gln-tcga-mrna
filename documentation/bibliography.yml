@@ -85,6 +85,11 @@ cbioportal:
     pages: "401-404"
   doi: "10.1158/2159-8290.CD-12-0095"
 
+cbioportal-datahub:
+  type: repository
+  title: "cBioPortal DataHub"
+  url: https://github.com/cBioPortal/datahub
+
 breast-cancer-subtypes:
   type: article
   title: "Molecular portraits of human breast tumours"
