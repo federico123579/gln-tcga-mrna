@@ -60,13 +60,11 @@ def plot_training_curves(
 
     batch = range(1, len(batch_losses) + 1)
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 4), sharex=True)
 
     # Loss curve
     ax1.plot(batch, batch_losses, "b-", linewidth=2, label="Training Loss")
-    ax1.set_xlabel("Batch")
     ax1.set_ylabel("Loss")
-    ax1.set_title("Training Loss")
     ax1.grid(True, alpha=0.3)
     ax1.legend()
 
@@ -81,7 +79,6 @@ def plot_training_curves(
         )
         ax2.set_xlabel("Batch")
         ax2.set_ylabel("Accuracy (%)")
-        ax2.set_title("Test Accuracy")
         ax2.grid(True, alpha=0.3)
         ax2.legend()
 
@@ -91,19 +88,18 @@ def plot_training_curves(
         ax2.annotate(
             f"Final: {final_acc:.2f}%",
             xy=(len(batch), final_acc),
-            xytext=(-50, 10),
+            xytext=(-50, -15),
             textcoords="offset points",
             fontsize=10,
             color="red",
         )
 
-    fig.suptitle(title, fontsize=14, fontweight="bold")
     plt.tight_layout()
 
     if output_path:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+        fig.savefig(output_path, dpi=500, bbox_inches="tight")
         print(f"Saved training curves to: {output_path}")
 
     return fig
@@ -233,58 +229,54 @@ def plot_model_comparison_cv(
     output_path: str | Path | None = None,
     title: str = "Model Comparison (K-Fold CV)",
 ) -> plt.Figure:
-    """Plot bar chart comparing model performance with error bars.
+    """Plot box chart comparing model performance with confidence intervals.
 
     Args:
         results: Dictionary mapping model names to CVResult objects.
         output_path: Path to save the figure (optional).
-        title: Plot title.
+        title: Plot title (not used, kept for API compatibility).
 
     Returns:
         Matplotlib Figure object.
     """
     model_names = list(results.keys())
     mean_accs = [results[name].mean_accuracy * 100 for name in model_names]
-    std_accs = [results[name].std_accuracy * 100 for name in model_names]
+    fold_accs = [results[name].fold_accuracies for name in model_names]
 
     # Sort by mean accuracy
     sorted_indices = np.argsort(mean_accs)[::-1]
     model_names = [model_names[i] for i in sorted_indices]
-    mean_accs = [mean_accs[i] for i in sorted_indices]
-    std_accs = [std_accs[i] for i in sorted_indices]
+    fold_accs = [fold_accs[i] for i in sorted_indices]
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(3, 4))
 
-    # Color bars: highlight the best model
-    colors = ["forestgreen" if i == 0 else "steelblue" for i in range(len(model_names))]
+    # Create blue color progression from light to dark
+    n_models = len(model_names)
+    colors = plt.cm.Blues(np.linspace(0.4, 0.9, n_models))
 
-    bars = ax.bar(
-        model_names,
-        mean_accs,
-        yerr=std_accs,
-        color=colors,
-        edgecolor="black",
-        capsize=5,
-        error_kw={"elinewidth": 2, "capthick": 2},
+    # Create vertical box plot
+    positions = range(len(model_names))
+    bp = ax.boxplot(
+        [np.array(accs) * 100 for accs in fold_accs],
+        positions=positions,
+        vert=True,
+        sym="",
+        widths=0.6,
+        patch_artist=True,
     )
 
-    ax.set_xlabel("Model")
-    ax.set_ylabel("Accuracy (%)")
-    ax.set_title(title, fontsize=14, fontweight="bold")
-    ax.set_ylim(0, 105)
-    ax.grid(axis="y", alpha=0.3)
+    # Color the boxes
+    for patch, color in zip(bp["boxes"], colors):
+        patch.set_facecolor(color)
+        patch.set_edgecolor("black")
 
-    # Add value labels on bars
-    for bar, mean, std in zip(bars, mean_accs, std_accs):
-        ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            bar.get_height() + std + 1,
-            f"{mean:.1f}%",
-            ha="center",
-            va="bottom",
-            fontsize=11,
-            fontweight="bold",
-        )
+    ax.set_xticks(positions)
+    ax.set_xticklabels(model_names)
+    ax.set_ylabel("Accuracy (%)", fontsize=11)
+
+    ax.set_ylim(84, None)
+
+    ax.grid(axis="y", alpha=0.3)
 
     plt.tight_layout()
 

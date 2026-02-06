@@ -56,6 +56,12 @@ def parse_args() -> argparse.Namespace:
         help="Number of CV folds (default: None, uses single train/test split)",
     )
     parser.add_argument(
+        "--n-repeats",
+        type=int,
+        default=1,
+        help="Number of CV repeats (default: 1, no repeats)",
+    )
+    parser.add_argument(
         "--compare",
         action="store_true",
         help="Generate model comparison chart",
@@ -156,15 +162,19 @@ def run_baselines(args: argparse.Namespace) -> None:
 def run_baselines_cv(args, dataset, config, results_dir, seed) -> None:
     """Run baselines with k-fold cross-validation."""
     n_folds = args.cv_folds
+    n_repeats = args.n_repeats
 
-    print(f"\nRunning {n_folds}-fold cross-validation...")
+    if n_repeats > 1:
+        print(f"\nRunning {n_folds}-fold cross-validation with {n_repeats} repeats...")
+    else:
+        print(f"\nRunning {n_folds}-fold cross-validation...")
 
     # Build configs
     mlp_config = {
         "layer_sizes": config.get("layer_sizes", [64, 32]),
         "learning_rate": 0.001,
-        "num_epochs": 100,
-        "batch_size": 32,
+        "num_epochs": config.get("num_epochs", 100),
+        "batch_size": config.get("batch_size", 32),
     }
 
     gln_config = {
@@ -183,15 +193,22 @@ def run_baselines_cv(args, dataset, config, results_dir, seed) -> None:
     cv_results = {}
 
     logreg_cv = train_with_cv(
-        dataset, "logreg", {}, n_folds=n_folds, seed=seed, verbose=args.verbose
+        dataset,
+        "logreg",
+        {},
+        n_folds=n_folds,
+        n_repeats=n_repeats,
+        seed=seed,
+        verbose=args.verbose,
     )
-    cv_results["Logistic Regression"] = logreg_cv
+    cv_results["Log. Reg."] = logreg_cv
 
     mlp_cv = train_with_cv(
         dataset,
         "mlp",
         mlp_config,
         n_folds=n_folds,
+        n_repeats=n_repeats,
         seed=seed,
         device=args.device,
         verbose=args.verbose,
@@ -203,6 +220,7 @@ def run_baselines_cv(args, dataset, config, results_dir, seed) -> None:
         "gln",
         gln_config,
         n_folds=n_folds,
+        n_repeats=n_repeats,
         seed=seed,
         device=args.device,
         verbose=args.verbose,

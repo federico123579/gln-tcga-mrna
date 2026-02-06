@@ -251,6 +251,7 @@ def train_with_cv(
     config: dict[str, Any],
     *,
     n_folds: int = 5,
+    n_repeats: int = 1,
     seed: int = 42,
     device: torch.device | str = "cpu",
     verbose: bool = False,
@@ -283,7 +284,7 @@ def train_with_cv(
     print(f"\nTraining {model_name} with {n_folds}-fold CV...")
 
     for fold_idx, (train_ds, test_ds) in enumerate(
-        dataset.k_fold_split(n_folds=n_folds, shuffle=True, random_seed=seed)
+        dataset.k_fold_split(n_folds=n_folds, n_repeats=n_repeats, random_seed=seed)
     ):
         if verbose:
             print(f"  Fold {fold_idx + 1}/{n_folds}...")

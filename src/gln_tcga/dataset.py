@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import torch
 from joblib import Memory
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import RepeatedStratifiedKFold
 from torch.utils.data import TensorDataset
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -89,7 +89,7 @@ class Dataset:
         self,
         *,
         n_folds: int = 5,
-        shuffle: bool = True,
+        n_repeats: int = 1,
         random_seed: int = 42,
     ) -> Iterator[tuple[TensorDataset, TensorDataset]]:
         """Generate k-fold cross-validation splits.
@@ -104,9 +104,9 @@ class Dataset:
         Yields:
             Tuples of (train_dataset, test_dataset) for each fold.
         """
-        skf = StratifiedKFold(
+        skf = RepeatedStratifiedKFold(
             n_splits=n_folds,
-            shuffle=shuffle,
+            n_repeats=n_repeats,
             random_state=random_seed,
         )
 

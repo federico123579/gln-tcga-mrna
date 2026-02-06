@@ -213,6 +213,11 @@ def train_gln(
             end_factor=0.1,
             total_iters=total_steps,
         )
+        # scheduler = ConstantLR(
+        #     optim,
+        #     factor=1,
+        #     total_iters=total_steps,
+        # )
 
         # Weight clamping bounds (for backprop mode)
         weight_clamp_min = config.get("weight_clamp_min", -10.0)
