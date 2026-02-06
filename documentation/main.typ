@@ -165,18 +165,14 @@ The benchmark trains a `MulticlassGLN` via a one-vs-all decomposition. Two train
 )
 
 #let accuracy_figure = figure(
-  grid(
-    columns: (auto, auto),
-    gutter: 5pt,
-    accuracy_table(data.accuracies.p1), accuracy_table(data.accuracies.p2),
-  ),
-  caption: [MNIST per-class test accuracies for the reproduction run (split for readability).],
+  image("assets/accuracies_barplot.png", width: 100%),
+  caption: [Barplot of the MNIST per-class test accuracies],
 )
 
 #align(center, block(
-  width: 90%,
+  width: 100%,
   grid(
-    columns: (auto, auto),
+    columns: (60%, auto),
     gutter: 1cm,
     accuracy_figure, parameter_figure,
   ),
