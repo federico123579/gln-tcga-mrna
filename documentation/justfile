@@ -1,5 +1,5 @@
 default:
-    typst compile main.typ
+    typst compile report.typ
 
 dev:
-    typst watch main.typ
+    typst watch report.typ
