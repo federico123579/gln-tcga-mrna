@@ -3,3 +3,7 @@ default:
 
 dev:
     typst watch report.typ
+
+deliver:
+    mkdir -p ../deliverables/
+    typst compile --pdf-standard a-4 report.typ ../deliverables/report.pdf

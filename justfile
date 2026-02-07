@@ -9,7 +9,7 @@ default:
     @just --list
 
 docs:
-    just -f documentation/justfile
+    just -f documentation/justfile deliver
 
 sync:
     uv sync
