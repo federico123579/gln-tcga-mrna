@@ -114,3 +114,78 @@ model, transformer, config = load_model("experiments/exp01/latest/models/gln_see
 ## Biomarker Analysis
 
 The analysis uses **Integrated Gradients** to compute gene importance - measuring how much each gene contributes to the model's tumor vs normal predictions. This is more meaningful than extracting weights, as it captures the actual learned decision-making process.
+
+## Reproducing the Report (TCGA-BRCA)
+
+All commands below are run from the repository root after `uv sync`.
+
+### 1) Local OGD run + attributions (used for IG/saliency figures)
+
+```bash
+# Paper-faithful local OGD (single pass, batch size 1)
+uv run gln-train \
+ --experiment report-ogd \
+ --online-ogd \
+ --epochs 1 \
+ --batch-size 1 \
+ --lr 0.01 \
+ --lr-schedule sqrt \
+ --layers 20 40 20 \
+ --context-dim 4 \
+ --seeds 4
+
+# Integrated Gradients (Captum) attribution report
+uv run gln-analyze \
+ --experiment report-ogd \
+ --method ig \
+ --use-captum \
+ --n-steps 50 \
+ --batch-size 10 \
+ --baseline mean
+
+# Saliency attribution report
+uv run gln-analyze \
+ --experiment report-ogd \
+ --method saliency \
+ --saliency-samples 3
+```
+
+Outputs are written under `experiments/report-ogd/latest/results/`.
+
+### 2) Training-curve panels (local OGD vs backprop)
+
+Use a separate experiment name per configuration so each run produces its own `results/training_curves.png`.
+
+```bash
+# Local OGD, decay (sqrt) schedule
+uv run gln-train --experiment curves-local-decay --online-ogd --epochs 1 --batch-size 1 --lr 0.01 --lr-schedule sqrt --layers 20 40 20 --context-dim 4 --seeds 4
+uv run gln-curves --experiment curves-local-decay --retrain --online-ogd
+
+# Local OGD, constant schedule
+uv run gln-train --experiment curves-local-const --online-ogd --epochs 1 --batch-size 1 --lr 0.01 --lr-schedule constant --layers 20 40 20 --context-dim 4 --seeds 4
+uv run gln-curves --experiment curves-local-const --retrain --online-ogd
+
+# Backprop, batch size 1, linear decay
+uv run gln-train --experiment curves-bp-decay --epochs 1 --batch-size 1 --lr 0.01 --lr-schedule linear --layers 20 40 20 --context-dim 4 --seeds 4
+uv run gln-curves --experiment curves-bp-decay --retrain
+
+# Backprop, batch size 1, constant
+uv run gln-train --experiment curves-bp-const --epochs 1 --batch-size 1 --lr 0.01 --lr-schedule constant --layers 20 40 20 --context-dim 4 --seeds 4
+uv run gln-curves --experiment curves-bp-const --retrain
+
+# Backprop, batch size 10, 10 epochs (smooth curves)
+uv run gln-train --experiment curves-bp-10 --epochs 10 --batch-size 10 --lr 0.01 --lr-schedule linear --layers 20 40 20 --context-dim 4 --seeds 4
+uv run gln-curves --experiment curves-bp-10 --retrain
+```
+
+### 3) Baseline comparisons and cross-validation boxplots
+
+```bash
+# Local OGD GLN vs baselines (CV)
+uv run gln-baselines --experiment report-ogd --cv-folds 5 --n-repeats 3 --compare --online-ogd
+
+# Backprop GLN vs baselines (CV)
+uv run gln-baselines --experiment report-ogd --cv-folds 5 --n-repeats 3 --compare
+```
+
+The comparison plots are saved under `experiments/<experiment>/latest/results/`.
