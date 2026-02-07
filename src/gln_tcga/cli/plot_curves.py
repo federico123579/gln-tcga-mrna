@@ -150,6 +150,7 @@ def run_curves(args: argparse.Namespace) -> None:
             "layer_sizes": config.get("layer_sizes", [64, 32]),
             "context_dimension": config.get("context_dimension", 4),
             "learning_rate": config.get("learning_rate", 0.001),
+            "lr_schedule": config.get("lr_schedule", "constant"),
             "num_epochs": config.get("num_epochs", 100),
             "batch_size": config.get("batch_size", 32),
             "seed": seed,
@@ -163,6 +164,7 @@ def run_curves(args: argparse.Namespace) -> None:
         print(f"  Layer sizes: {train_config['layer_sizes']}")
         print(f"  Context dimension: {train_config['context_dimension']}")
         print(f"  Learning rate: {train_config['learning_rate']}")
+        print(f"  LR schedule: {train_config['lr_schedule']}")
         print(f"  Epochs: {train_config['num_epochs']}")
         print(f"  Batch size: {train_config['batch_size']}")
 

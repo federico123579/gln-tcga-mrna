@@ -8,7 +8,7 @@ from typing import Any
 import gln
 import torch
 from torch.optim import Adam
-from torch.optim.lr_scheduler import LinearLR
+from torch.optim.lr_scheduler import ConstantLR, LinearLR
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
@@ -207,17 +207,19 @@ def train_gln(
         # Standard end-to-end backprop with Adam
         optim = Adam(model.parameters(), lr=config["learning_rate"])
         total_steps = len(train_dl) * config["num_epochs"]
-        scheduler = LinearLR(
-            optim,
-            start_factor=1.0,
-            end_factor=0.1,
-            total_iters=total_steps,
-        )
-        # scheduler = ConstantLR(
-        #     optim,
-        #     factor=1,
-        #     total_iters=total_steps,
-        # )
+        if config.get("lr_schedule", "linear") == "linear":
+            scheduler = LinearLR(
+                optim,
+                start_factor=1.0,
+                end_factor=0.1,
+                total_iters=total_steps,
+            )
+        else:
+            scheduler = ConstantLR(
+                optim,
+                factor=1.0,
+                total_iters=total_steps,
+            )
 
         # Weight clamping bounds (for backprop mode)
         weight_clamp_min = config.get("weight_clamp_min", -10.0)
