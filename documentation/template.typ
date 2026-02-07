@@ -13,11 +13,21 @@
 #let nnormal = $N_"normal"$
 
 // Model parameters
+#let epochs = $E$
+#let batchsize = $M$
 #let ctxdim = $K$
 #let nlayers = $L$
+#let layer1 = $L_1$
+#let layer2 = $L_2$
+#let layeri = $L_i$
 #let ctxV = $bold(V)_"ctx"$
 #let ctxb = $bold(b)_"ctx"$
 #let Wmat = $bold(W)$
+#let lr = $eta_t$
+#let lrsched = $t arrow.r.bar eta_t$
+
+// Reproduction parameters
+#let seed = $s$
 
 // Metrics
 #let acc = $"Acc"$
@@ -418,4 +428,16 @@
 
   #pagebreak()
   #bibliography("bibliography.yml")
+]
+
+#let appendix_template(doc) = [
+  #set heading(numbering: none)
+  #pagebreak()
+
+  = Appendix
+
+  #counter(heading).update(0)
+  #set heading(numbering: "I.", level: 1)
+
+  #doc
 ]

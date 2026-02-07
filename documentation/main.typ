@@ -270,3 +270,15 @@ These protocols are essential in the high-dimensional regime (many more features
 // Bibliography handled by the template
 
 // FIXME APPENDIX
+
+#show: doc => appendix_template(doc)
+
+== Glossary <glossary>
+
+/ #epochs: number of passes through the training data
+/ #batchsize: number of samples per minibatch
+/ #layer1, #layer2, #layeri $dots.h$: layer sizes (number of neurons per layer)
+/ #ctxdim: context dimension (number of half-space tests per neuron)
+/ #lr: learning rate (depends on learning schedule)
+/ #lrsched: learning rate schedule (e.g., "decay" for $eta_t = eta_0 / sqrt(t)$, "constant" for $eta_t = eta_0$)
+/ #seed: random seed for reproducibility (affects weight initialization and half-space sampling)
