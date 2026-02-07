@@ -275,17 +275,55 @@
       align(left, c)
     }
   }
-  #block(height: auto, columns(1, gutter: 2mm, table(
-    stroke: none,
+  #set text(size: 10pt)
+  #let fn = footnote[Parameters description can be found in the Appendix @glossary]
+  #table(
+    stroke: (x, y) => {
+      if y > 1 {
+        (x: 1pt + black, top: (paint: black, thickness: 1pt, dash: "dotted"))
+      } else if y == 0 {
+        (1pt + black)
+      } else if y == 1 {
+        (x: 1pt + black)
+      }
+    },
     rows: auto,
     columns: (auto, auto),
-    align: (right + horizon, left + horizon),
-    inset: (x: 2mm, y: 3.5pt),
-    table.header([*Parameter*], [*Value*]),
+    align: (center, center),
+    inset: (x: 2mm, y: 4pt),
+    table.header([*Param. #fn*], [*Value*]),
     table.hline(),
     ..for (param, value) in parameters {
       ([#param], [#value])
     },
+    table.hline(),
+  )
+]
+
+#let subplot(letter, image_url, dx: 6%, dy: -2%) = block[
+  #image(image_url)
+  #let background_color = luma(210).transparentize(10%)
+  #let stroke_color = black.transparentize(10%)
+  #place(top + left, dx: dx, dy: dy, square(
+    fill: background_color,
+    radius: 2pt,
+    inset: 2pt,
+    stroke: stroke_color,
+    strong(text(
+      size: 13pt,
+      upper(letter),
+      fill: stroke_color,
+    )),
+  ))
+]
+
+#let subplot_ref(letter) = box(baseline: 2pt)[
+  #let background_color = luma(210).transparentize(10%)
+  #let stroke_color = black.transparentize(10%)
+  #square(fill: background_color, radius: 2pt, stroke: stroke_color, height: 10pt, inset: 1.5pt, strong(text(
+    size: 10pt,
+    upper(letter),
+    fill: stroke_color,
   )))
 ]
 

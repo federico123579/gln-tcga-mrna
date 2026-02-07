@@ -240,12 +240,94 @@ These protocols are essential in the high-dimensional regime (many more features
 
 = Experimental Results
 
-// FIXME
+This section summarizes the empirical behavior of GLNs on TCGA-BRCA tumor vs. normal classification, with two complementary goals: (i) assess predictive performance in a high-dimensional setting and (ii) characterize how sensitive the method is to optimization choices, which is a prerequisite for any subsequent interpretability analysis.
 
-== Hyperparameter Configurations Tested // FIXME
-== Online Learning Behavior // FIXME
-== Baseline Comparisons // FIXME
-== Cross-Validation Results // FIXME
+In particular, the two training regimes introduced in @training-regimes are contrasted: paper-faithful local online OGD versus end-to-end batch optimization (Adam/backpropagation). For both regimes, representative learning dynamics are reported and performance is compared against standard baselines.
+
+== Hyperparameter Configurations
+The experiments in this section are run under a small set of controlled hyperparameter choices, with the goal of making training-regime comparisons interpretable rather than exhaustively tuned. The common configuration used for the cross-validation comparison and for the representative training-curve runs is summarized in @tcga_hparams.
+
+Two choices are deliberate. First, several runs use a single epoch (one pass through the data) to directly probe the paper's online-learning claim: meaningful performance should emerge quickly, without relying on repeated passes through a limited cohort. Second, batch size is set to 1 in the most direct comparisons because it maximizes the number of parameter updates per observed sample and makes the distinction between local OGD and backpropagation most visible in the loss/accuracy trajectories. Larger batches (e.g., 10) are additionally included to show how conventional minibatching smooths optimization in the batch regime, even though it departs from the strictly online setting.
+
+== Training Dynamics: Local OGD vs. Backpropagation
+On TCGA-BRCA, the separability of the task leads most regimes to achieve high test accuracy, but the training dynamics differ substantially across update rules and learning-rate schedules.
+
+In the local online OGD setting (@tcga_training_curves, subplots #subplot_ref("a") and #subplot_ref("b")), training loss is highly intermittent, with frequent sharp spikes throughout training. This behavior is consistent with the online nature of the update and with the discretization induced by contextual gating: each minibatch (here, a single sample) triggers a potentially large step on the weights of the currently active experts, and small changes in the active-path mixture can translate into abrupt changes in loss.
+
+Learning-rate control is particularly consequential under local updates. The decay schedule (subplot #subplot_ref("a")) yields higher and more stable final accuracy than the constant step-size variant (subplot #subplot_ref("b")), suggesting that step-size decay is important for mitigating the variance introduced by sample-wise updates and context-dependent expert selection.
+
+In contrast, batch backpropagation with batch size 1 (subplots #subplot_ref("c") and #subplot_ref("d")) exhibits a higher loss at the beginning of training but converges more smoothly. The same qualitative pattern holds for the learning-rate schedule: decay (subplot #subplot_ref("c")) outperforms a constant step size (subplot #subplot_ref("d")), indicating that even when optimization is end-to-end, the high-dimensional setting benefits from reducing the effective step size over time.
+
+Finally, batch backpropagation with batch size 10 (subplots #subplot_ref("e") and #subplot_ref("f")) produces the smoothest curves and the fastest convergence in terms of minibatches, at the cost of giving up the strictly online update principle. This contrast motivates the two-regime implementation: local online OGD is retained to test the theoretical learning rule under realistic data, while the batch regime enables controlled ablations and comparisons against standard optimization practice.
+
+#figure(
+  pad(x: -0.5cm, grid(
+    columns: (50%, 50%),
+    gutter: 0pt,
+    subplot("a", "assets/training_curves_local_decay.png"), subplot("b", "assets/training_curves_local_constant.png"),
+    subplot("c", "assets/training_curves_backprop_decay.png"),
+    subplot("d", "assets/training_curves_backprop_constant.png"),
+
+    subplot("e", "assets/training_curves_backprop_10_decay.png"),
+    subplot("f", "assets/training_curves_backprop_10_constant.png"),
+  )),
+  caption: [Training curves on TCGA-BRCA. Each subplot shows loss (top) and test accuracy (bottom) as a function of minibatches. The two columns correspond to learning-rate schedules (decay #subplot_ref("a") #subplot_ref("c") #subplot_ref("e") vs. constant #subplot_ref("b") #subplot_ref("d") #subplot_ref("f")), while the three rows correspond to training regimes: (i) local online OGD, single pass (#subplot_ref("a"), #subplot_ref("b")); (ii) batch backpropagation with batch size 1 (online backprop), single pass (#subplot_ref("c"), #subplot_ref("d")); (iii) batch backpropagation with batch size 10 (standard minibatching), trained for 10 epochs (#subplot_ref("e"), #subplot_ref("f")).
+  ],
+) <tcga_training_curves>
+
+== Baseline Comparisons
+To contextualize GLN performance, the experimental pipeline includes two baselines trained on the same splits used for the GLN runs:
++ Logistic regression as a strong convex model in high-dimensional settings
++ A MLP as a standard nonlinear reference.
+
+The logistic regression baseline is implemented with `sklearn` and uses feature-wise standardization (via `StandardScaler`) followed by `LogisticRegression` with the `lbfgs` solver and an $L_2$ penalty (default inverse regularization strength $C=1$). The MLP baseline matches the GLN hidden-layer sizes for a controlled comparison, uses ReLU nonlinearities and a sigmoid output, and is trained end-to-end with Adam and a linear learning-rate schedule. Inputs are standardized using training-set statistics (as in the GLN pipeline's first standardization step).
+
+Results for these baselines are reported in the cross-validation comparisons in @tcga_model_comparison_cv.
+
+== Cross-Validation Results
+Single hold-out splits can overestimate performance when $p$ is large and $n$ is moderate. For this reason, models are also evaluated with stratified $k$-fold cross-validation (default: $k=5$) repeated for $n$ times (default: $n=3$) to assess variability across splits and seeds.
+
+@tcga_model_comparison_cv summarizes these results via accuracy boxplots. Two trends are noteworthy:
++ Baseline methods exhibit relatively tight distributions, reflecting the stability of convex (logistic regression) or well-regularized (MLP) training.
++ GLN variants display larger accuracy dispersion across folds, especially with local OGD, reflecting sensitivity to split-induced shifts and hyperparameter choices. This instability reduces confidence in attribution results: feature attributions are meaningful only when the learned predictors are stable across reasonable resamplings.
+
+
+
+#let params = (
+  (epochs, 1),
+  (batchsize, 1),
+  (layeri, [20, 40, 20]),
+  (ctxdim, 4),
+  (lr, 0.01),
+  (lrsched, "const"),
+  (seed, 4),
+)
+#let parameter_figure = [
+  #figure(
+    parameter_table((params)),
+    caption: [Common hyperparameters used for the TCGA-BRCA experiments reported in this section. Parameters not listed here are left at their codebase defaults; the exact CLI options and default values are documented in the repository README.],
+  ) <tcga_hparams>
+]
+
+#let boxplots = [
+  #let subplot = subplot.with(dx: 21%, dy: 85%)
+  #figure(
+    box(width: 100%, grid(
+      columns: (50%, 50%),
+      gutter: 0pt,
+      subplot("a", "assets/model_comparison_cv_local.png"), subplot("b", "assets/model_comparison_cv_backprop.png"),
+    )),
+    caption: [Cross-validation comparison across model families. Boxplots report accuracy distributions across repeated stratified $k$-fold splits. The subplot #subplot_ref("a") corresponds to GLNs trained with local online OGD, while #subplot_ref("b") corresponds to GLNs trained with end-to-end backpropagation. In both panels, GLN variants are compared against a logistic regression baseline and a feed-forward MLP baseline (trained with standard backpropagation).],
+  ) <tcga_model_comparison_cv>
+]
+
+#grid(
+  columns: (60%, auto),
+  gutter: 10mm,
+  inset: 0pt,
+  align: horizon,
+  boxplots, parameter_figure,
+)
 
 = Interpretability Analysis
 
