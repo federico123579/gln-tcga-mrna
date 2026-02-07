@@ -141,11 +141,12 @@ $ eta_t = eta_0 / sqrt(t), $
 which yields an $O(sqrt(T))$ regret bound for OGD under standard assumptions (convex loss, bounded gradients, bounded domain). In practice, the implementation also provides a vectorized variant of the update: within a batch, gradients corresponding to samples that activate the same (neuron, context) expert are aggregated before applying the step, trading exact per-sample updates for speed.
 
 === (B) Batch Adam (End-to-end Optimization for Ablations)
-For empirical comparisons and controlled experiments, the same GLN can be trained in a *batch* regime using standard end-to-end optimization. In this mode, we minimize the empirical risk
+For empirical comparisons and controlled experiments, the same GLN can be trained in a batch regime using standard end-to-end optimization. In this mode, the empirical risk is minimized:
 $ min_theta (1/n) sum_{i=1}^n ell(y_i, f_theta(bold(p)_i)), $
 where $theta$ collects all learnable parameters (in particular, the expert weight tables and bias parameters) and $f_theta$ is the compositional forward map of the stacked gated layers.
 
-Optimization is performed with Adam in our experiments, but the implementation is agnostic to the specific choice of optimizer: any PyTorch-compatible optimizer (e.g., SGD, AdamW, RMSprop, Adagrad) can be plugged in to update the expert weight tables and bias parameters. Since contextual gating is discrete, the resulting objective is piecewise smooth: for a fixed set of active experts, gradients flow to the selected weights, while the gating boundaries remain fixed (hyperplanes are not trained). To stabilize training across optimizers, weights are optionally clamped to a finite range after each optimizer step.
+Optimization is performed with Adam in the experiments reported in this work, but the implementation is agnostic to the specific choice of optimizer: any PyTorch-compatible optimizer (e.g., SGD, AdamW, RMSprop, Adagrad) can be plugged in to update the expert weight tables and bias parameters.
+Since contextual gating is discrete, the resulting objective is piecewise smooth: for a fixed set of active experts, gradients flow to the selected weights, while the gating boundaries remain fixed (hyperplanes are not trained). To stabilize training across optimizers, weights are optionally clamped to a finite range after each optimizer step.
 
 The two regimes should be interpreted as complementary: online OGD matches the theoretical GLN learning rule and supports regret-style guarantees, whereas batch Adam intentionally relaxes the local-learning principle to enable ablations and stress-tests in the high-dimensional settings.
 
