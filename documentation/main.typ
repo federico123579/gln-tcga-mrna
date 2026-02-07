@@ -209,9 +209,9 @@ Data are retrieved from the public cBioPortal DataHub repository @cbioportal-dat
 Each file is a tab-separated _expression matrix_, whose rows index genes and whose columns index samples. Each entry $e_(g,s)$ represents the (RSEM-based) expression estimate of gene $g$ in sample $s$ @rsem. Downloaded artifacts are cached locally to make reruns deterministic and to avoid repeated network transfers.
 
 == Dataset Construction and Cleaning
-The loader parses the two tab-separated tables, removes the metadata column `Entrez_Gene_Id` when present, and transposes the matrices so that each row is a sample and each column is a gene.
+The loader parses the two tab-separated tables, removes metadata columns, and transposes the matrices so that each row is a sample and each column is a gene.
 
-Tumor and normal files do not always contain exactly the same gene list. Therefore, the final feature set keeps only genes that appear in both sources. If we denote by $G_"tumor"$ and $G_"normal"$ the gene sets in the two tables, we use $G^* = G_"tumor" ∩ G_"normal"$. Genes with missing names are discarded and duplicate gene columns are removed.
+Tumor and normal files do not always contain exactly the same gene list. Therefore, the final feature set keeps only genes that appear in both sources. Denoting by $G_"tumor"$ and $G_"normal"$ the gene sets in the two tables, the final feature set is the intersection $G^* = G_"tumor" ∩ G_"normal"$. Genes with missing names are discarded and duplicate gene columns are removed.
 
 The final design matrix is $X in RR^(n times p), quad p = |G^*|$
 and labels are defined as
