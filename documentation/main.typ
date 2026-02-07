@@ -1,6 +1,5 @@
 // ============================================================================
 // GLN-TCGA Binary Classification Report
-// FIXME: title
 // ============================================================================
 
 #import "template.typ": *
@@ -13,12 +12,12 @@
   instructors: (
     "Prof. Marcello Restelli",
   ),
-  meta_title: "Meta title", // FIXME
-  title: "Title", // FIXME
-  subtitle: "Subtitle", // FIXME
+  meta_title: "A Reproducible PyTorch Implementation of Gated Linear Networks",
+  title: "A Reproducible PyTorch Implementation of Gated Linear Networks",
+  subtitle: "Online Learning, Benchmarking, and a TCGA-BRCA Case Study",
   course_name: "Multidisciplinary Project (5 CFU)",
   academic_year: "2025-2026",
-  abstract: [], // FIXME
+  abstract: [Gated Linear Networks (GLNs) replace end-to-end backpropagation with context-gated geometric mixing and purely local convex updates. This report's primary contribution is a clean, modular, and reproducible PyTorch implementation of GLNs, designed to make the architecture easy to inspect, extend, and benchmark under controlled training regimes. The current implementation supports both paper-faithful local online learning (OGD) and batch optimization for ablations. Validation is provided on MNIST and on TCGA-BRCA tumor vs. normal classification (a setting with far more features than samples). While TCGA confirms that high accuracy is attainable under local OGD, it should be considered a partial failure from an interpretability perspective: Integrated Gradients and saliency do not yield robust gene-level rankings aligned with known breast cancer markers, suggesting that fixed random half-space gating can be incompatible with biomarker-style explanations even when predictive performance is strong.],
   doc,
 )
 
@@ -33,7 +32,7 @@ Gated Linear Networks (GLNs) are a class of neural networks introduced by #long-
 This work provides:
 
 + A clean, modular GLN implementation in PyTorch #footnote([de-facto standard for the deep learning research community, see #long-cite(<pytorch>)]) designed for extension and controlled experimentation, following best practices for reproducible research and GPU acceleration.
-+ An empirical study on a real high-dimensional biomedical task (TCGA-BRCA mRNA-based tumor vs. normal classification @tcga-brca)).
++ An empirical study on a real high-dimensional biomedical task (TCGA-BRCA mRNA-based tumor vs. normal classification @tcga-brca).
 
 Beyond predictive performance, an analysis of interpretability is performed using Saliency attribution and Integrated Gradients @integrated-gradients methods, revealing important constraints when applying explainability techniques to GLNs.
 
@@ -384,28 +383,23 @@ Vanilla saliency provides an additional lens on the model but does not resolve t
   caption: [Vanilla saliency attribution on TCGA-BRCA (OGD-trained GLN). Left: top-ranked genes by mean absolute gradient contribution. Right: ranks of known breast cancer genes under saliency scoring. Compared to IG, saliency yields a more local and often less stable notion of importance, reinforcing that gene-level rankings are not robust under this architecture.],
 ) <tcga_saliency>
 
-= Discussion
-
-// FIXME
-
-== The Interpretability Paradox // FIXME
-== When GLN Interpretability Works vs. Fails // FIXME
-== Practical Implications // FIXME
-
 = Conclusion
 
-// FIXME
+The empirical study in Part II shows that GLNs can be trained successfully on TCGA-BRCA under the paper-faithful local online OGD regime and can achieve high classification accuracy in a high-dimensional setting. When compared against strong baselines, performance is competitive but does not inherently surpass convex linear models on this specific task, which is consistent with the separability of tumor vs. normal expression profiles.
 
-== Summary of Contributions // FIXME
-== Future Work // FIXME
+The interpretability analysis highlights a more fundamental limitation. Although GLNs expose a notion of active-path computation and use strictly local updates, this structure does not automatically yield reliable gene-level explanations on genomic data. Under both Integrated Gradients and saliency, top-ranked genes do not consistently align with widely reported breast cancer markers, and known genes may appear far down the ranking. This mismatch is best understood as architectural: contextual gating relies on fixed random half-space tests, so predictive signal is routed through a discrete partition defined by arbitrary linear combinations of genes. In consequence, attribution methods that attempt to assign credit to individual coordinates can be unstable or misleading even when predictive performance is strong.
+
+== Summary of Contributions
++ A modular PyTorch implementation of GLNs with contextual gating and geometric mixing, supporting both paper-faithful local online OGD and batch optimization for ablations.
++ A reproducibility benchmark on MNIST, including configuration reporting and qualitative saliency visualizations.
++ An empirical evaluation on TCGA-BRCA with controlled splits and baseline comparisons against logistic regression and an MLP.
++ An interpretability study on OGD-trained GLNs using Integrated Gradients and saliency, documenting the observed accuracy--interpretability tension and attributing it to fixed random gating.
 
 // ============================================================================
 // REFERENCES & APPENDIX
 // ============================================================================
 
 // Bibliography handled by the template
-
-// FIXME APPENDIX
 
 #show: doc => appendix_template(doc)
 
