@@ -1,4 +1,4 @@
 [submodule "gated-linear-networks"]
 	path = gated-linear-networks
-	url = ssh://git@10.8.0.12:3009/fede/gated-linear-networks.git
+	url = git@github.com:federico123579/gated-linear-networks.git
 	branch = main
