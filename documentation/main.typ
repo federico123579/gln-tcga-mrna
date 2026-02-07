@@ -157,12 +157,22 @@ Results on the MNIST dataset @mnist are provided as an external reproducibility 
 
 The benchmark suite lives in `gated-linear-networks/benchmarks`. The most reliable reproduction instructions (installation, CLI options, and output paths) are given in the benchmark README in that directory.
 
-The benchmark trains a `MulticlassGLN` via a one-vs-all decomposition. Two training modes are available: paper-faithful online OGD (default) and batch backpropagation (enabled with `--backprop`). The run summarized here uses online OGD and then generates a 2$times$5 saliency grid over the ten digit classes (see @mnist_saliency). The hyperparameter configuration and the per-class test accuracies are summarized in the tables below.
+The benchmark trains a `MulticlassGLN` via a one-vs-all decomposition. Two training modes are available: paper-faithful online OGD (default) and batch backpropagation. The run summarized here uses online OGD and then generates a 2$times$5 saliency grid over the ten digit classes (see @mnist_saliency). The hyperparameter configuration and the per-class test accuracies are summarized in the tables below.
 
-#let parameter_figure = figure(
-  parameter_table((data.parameters)),
-  caption: [MNIST benchmark hyperparameters used in the reproduction run.],
+#let params = (
+  (epochs, 1),
+  (batchsize, 1),
+  (lr, 0.01),
+  ([#layer1, #layer2], [50, 25]),
+  (ctxdim, 6),
+  (lrsched, "sqrt"),
 )
+#let parameter_figure = [
+  #figure(
+    parameter_table((params)),
+    caption: [MNIST benchmark hyperparameters used for the run.],
+  ) <mnist_accuracies>
+]
 
 #let accuracy_figure = figure(
   image("assets/accuracies_barplot.png", width: 100%),
@@ -173,12 +183,13 @@ The benchmark trains a `MulticlassGLN` via a one-vs-all decomposition. Two train
   width: 100%,
   grid(
     columns: (60%, auto),
+    align: horizon,
     gutter: 1cm,
     accuracy_figure, parameter_figure,
   ),
 ))
 
-On this configuration, the overall test accuracy was #strong([0.9203]). Per-class accuracies are reported in the table above; the most challenging classes in this run were 5 and 9, while 1 achieved the highest accuracy.
+On this configuration, the overall test accuracy was #strong([92.03%]). Per-class accuracies are reported in @mnist_accuracies; the most challenging classes in this run were 5 and 9, while 1 achieved the highest accuracy.
 
 #figure(
   image("assets/mnist_saliency_maps.png", width: 100%),
