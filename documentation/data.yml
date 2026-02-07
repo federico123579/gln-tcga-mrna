@@ -11,10 +11,3 @@ accuracies:
     7: 0.9383
     8: 0.9250
     9: 0.8604
-parameters:
-  epochs: 1
-  batch_size: 5
-  lr: 0.01
-  layers: 50 25
-  context_dim: 6
-  lr_schedule: sqrt

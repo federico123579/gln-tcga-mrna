@@ -315,9 +315,9 @@ Single hold-out splits can overestimate performance when $p$ is large and $n$ is
     box(width: 100%, grid(
       columns: (50%, 50%),
       gutter: 0pt,
-      subplot("a", "assets/model_comparison_cv_local.png"), subplot("b", "assets/model_comparison_cv_backprop.png"),
+      image("assets/model_comparison_cv_local.png"), image("assets/model_comparison_cv_backprop.png"),
     )),
-    caption: [Cross-validation comparison across model families. Boxplots report accuracy distributions across repeated stratified $k$-fold splits. The subplot #subplot_ref("a") corresponds to GLNs trained with local online OGD, while #subplot_ref("b") corresponds to GLNs trained with end-to-end backpropagation. In both panels, GLN variants are compared against a logistic regression baseline and a feed-forward MLP baseline (trained with standard backpropagation).],
+    caption: [Cross-validation comparison across model families. Boxplots report accuracy distributions across repeated stratified $k$-fold splits. Left: GLNs trained with local online OGD. Right: GLNs trained with end-to-end backpropagation. In both panels, GLN variants are compared against a logistic regression baseline and a feed-forward MLP baseline (trained with standard backpropagation).],
   ) <tcga_model_comparison_cv>
 ]
 
@@ -331,16 +331,58 @@ Single hold-out splits can overestimate performance when $p$ is large and $n$ is
 
 = Interpretability Analysis
 
-// FIXME
+This section examines whether the GLN predictor learned on TCGA-BRCA supports meaningful gene-level explanations. The motivating use case is biomarker discovery: beyond high classification accuracy, an attribution method should highlight genes that align with known tumor biology and remain stable under reasonable analysis choices.
 
-== The Promise of Interpretability // FIXME
-== Integrated Gradients Method // FIXME
-== Expected vs. Observed Results // FIXME
-== Architectural Modifications Tested // FIXME
-== Root Cause Analysis // FIXME
-=== Primary Cause: Random Fixed Hyperplanes // FIXME
-=== Secondary Cause: Sigmoid Saturation // FIXME
-== Alternative Attribution: Saliency // FIXME
+== The Promise of Interpretability
+GLNs are often described as naturally interpretable because each neuron computes a convex geometric mixture and (in the local regime) updates only the parameters on its active path. For a fixed input, the model selects a discrete set of experts through contextual gating and combines probability features through logit-space mixing. In principle, one could identify the active experts and attribute the final logit to the input genes through gradient-based credit assignment.
+
+In a genomics setting, this would ideally produce a ranked list of genes whose expression shifts the model towards tumor or normal. The remainder of this section evaluates whether this expectation holds in practice.
+
+== Integrated Gradients Method
+Integrated Gradients (IG) @integrated-gradients is used as the primary attribution method because it addresses common failure modes of raw gradients (notably saturation) by integrating sensitivity along a path from a baseline input $bold(x)_0$ to the actual input $bold(x)$.
+
+In this work, the baseline is the dataset mean. IG is approximated with 50 steps along the straight-line path from $bold(x)_0$ to $bold(x)$, and global importance is computed by aggregating the mean absolute attribution across samples.
+
+== Expected vs. Observed Results
+The expectation is that a model achieving high predictive performance should, at least to some extent, assign high importance to genes that are widely reported as breast-cancer relevant (e.g., ESR1, PGR, GATA3, TP53, BRCA1/2, ERBB2).
+
+@tcga_ig_top_genes shows the genes with highest average IG magnitude for an OGD-trained model. Many top-ranked genes are not canonical breast-cancer markers and include genes with unclear or indirect relevance to the task. More importantly, the right panel shows that a curated list of known cancer genes is not highly ranked by IG: only a small subset appears in the top 1,000 features, while many fall in the lower half of the full gene set.
+
+#figure(
+  pad(x: -1cm, grid(
+    columns: (54.5%, 45.5%),
+    gutter: 8pt,
+    image("assets/top_genes.png", width: 100%), image("assets/known_cancer_genes.png", width: 100%),
+  )),
+  caption: [Integrated Gradients feature attribution on TCGA-BRCA (OGD-trained GLN). Left: top-ranked genes by mean absolute IG attribution across samples. Right: ranks of a curated set of known breast cancer genes under the same scoring. High predictive accuracy does not translate into a biologically aligned gene ranking.],
+) <tcga_ig_top_genes>
+
+== Architectural Modifications Tested
+To assess whether the mismatch between accuracy and gene rankings is primarily an artifact of a single attribution choice, two controlled variations are considered.
+
+First, IG is compared against vanilla saliency (raw input gradients). Saliency measures local sensitivity at the input point and is known to be unstable under saturation and small perturbations; IG provides a more global attribution by construction.
+
+Across these variations, the qualitative conclusion is consistent: the model can separate tumor from normal reliably, but gene-level attribution is not robust enough to be treated as biomarker discovery.
+
+== Root Cause Analysis
+The observed behavior is best explained as an architectural limitation.
+
+=== Primary Cause: Random Fixed Hyperplanes
+The most consequential limitation is architectural. Contextual gating is implemented through random half-space tests with non-learnable parameters `ctx_V` and `ctx_b`. They are sampled once and remain fixed throughout training.
+
+As a result, each neuron's decision is conditioned on the sign pattern of random projections of the input, and learning occurs only in the expert weight tables indexed by those sign patterns. In this setting, the model does not learn that a specific gene is directly important; it learns that certain random linear combinations of genes define useful partitions of the input space. Importance is therefore distributed across many arbitrary mixtures, which makes single-gene attribution intrinsically fragile.
+
+== Alternative Attribution: Saliency
+Vanilla saliency provides an additional lens on the model but does not resolve the core issue. Figure @tcga_saliency shows that saliency-based rankings differ substantially from IG and can emphasize different gene sets and directions. This sensitivity is consistent with the theoretical limitation discussed above: when predictions are mediated by context-dependent expert selection and by saturating nonlinear preprocessing, local gradients can change sharply across nearby inputs.
+
+#figure(
+  pad(x: -1cm, grid(
+    columns: (54.5%, 45.5%),
+    gutter: 8pt,
+    image("assets/top_genes_saliency.png", width: 100%), image("assets/known_cancer_genes_saliency.png", width: 100%),
+  )),
+  caption: [Vanilla saliency attribution on TCGA-BRCA (OGD-trained GLN). Left: top-ranked genes by mean absolute gradient contribution. Right: ranks of known breast cancer genes under saliency scoring. Compared to IG, saliency yields a more local and often less stable notion of importance, reinforcing that gene-level rankings are not robust under this architecture.],
+) <tcga_saliency>
 
 = Discussion
 
